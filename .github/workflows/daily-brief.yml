@@ -1,0 +1,106 @@
+name: Security Intel Daily Brief
+
+# 全球安防情报自动化 —— 云端定时任务（GitHub Actions）
+#
+# GitHub Actions 的 cron 使用 UTC 时间，北京时间 = UTC + 8 小时。
+#   08:30 北京时间  =  00:30 UTC
+#
+# 默认「周一~周五」运行。如需每天（含周末）运行，把下面的 `1-5` 改成 `*`。
+on:
+  schedule:
+    - cron: '30 0 * * 1-5'
+  workflow_dispatch: {}   # 支持在 GitHub 网页上手动点「Run workflow」，便于测试
+
+permissions:
+  contents: read
+
+jobs:
+  daily-brief:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 安装 Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+
+      - name: 安装依赖
+        run: pip install -r requirements.txt
+
+      # 跨天去重依赖 output/history.json。用缓存恢复最近一次的历史，
+      # 运行结束后自动写回，这样「N 天内不重复上报」在云端也能生效。
+      - name: 恢复去重历史
+        uses: actions/cache@v4
+        with:
+          path: output/history.json
+          key: history-${{ github.run_id }}
+          restore-keys: |
+            history-
+
+      # 云端 runner 在美国，可直接访问 GDELT/USGS/BBC 等境外源，因此 PROXY 留空。
+      # 密钥（LLM_API_KEY / SMTP_USER / SMTP_PASS / EMAIL_TO）来自仓库 Secrets，
+      # 不会写入仓库，也不会出现在日志里（GitHub 会自动脱敏）。
+      - name: 生成 .env
+        run: |
+          mkdir -p output
+          cat > .env <<'EOF'
+          ENABLE_LLM=1
+          LLM_API_BASE=https://api.deepseek.com
+          LLM_API_KEY=${{ secrets.LLM_API_KEY }}
+          LLM_MODEL=deepseek-chat
+          LLM_TIMEOUT=60
+          ENABLE_GDELT=1
+          ENABLE_RELIEFWEB=0
+          ENABLE_USGS=1
+          ENABLE_CISA=1
+          ENABLE_NVD=0
+          ENABLE_MFA=0
+          GDELT_QUERY=conflict OR terrorism OR earthquake OR riot OR protest OR kidnapping OR "access control" OR "video surveillance" OR "security camera" OR "perimeter security"
+          GDELT_TIMESPAN=1d
+          GDELT_LIMIT=30
+          USGS_MIN_MAG=4.5
+          USGS_LIMIT=20
+          CISA_LIMIT=10
+          RSS_FEEDS=http://feeds.bbci.co.uk/news/world/rss.xml|geopolitical,https://www.aljazeera.com/xml/rss/all.xml|geopolitical,https://www.theguardian.com/world/rss|geopolitical,https://securityjournaluk.com/feed/|personnel,https://internationalsecurityjournal.com/feed/|personnel,https://securitylinkindia.com/feed/|personnel,https://www.revistasegurancaeletronica.com.br/feed/|personnel,https://www.send2press.com/wire/technology-news/security-tech-news/feed/|personnel,https://facilityexecutive.com/feed/|personnel,https://security.world/feed/|personnel
+          RSS_LIMIT=15
+          FILTER_POSITIVE=physical security,access control,perimeter,surveillance,intrusion detection,critical infrastructure,周界,门禁,视频监控,实体防护,物防技防,入侵探测
+          FILTER_NEGATIVE=cyber security,vulnerability,exploit,malware,漏洞,病毒,渗透,网络攻击
+          TOP_N=10
+          EMERGENCY_QUOTA=2
+          DEDUP_DAYS=7
+          SEVERITY_HIGHLIGHT=4
+          HISTORY_FILE=output/history.json
+          SMTP_HOST=smtp.qq.com
+          SMTP_PORT=465
+          SMTP_USER=${{ secrets.SMTP_USER }}
+          SMTP_PASS=${{ secrets.SMTP_PASS }}
+          SMTP_FROM=${{ secrets.SMTP_USER }}
+          EMAIL_TO=${{ secrets.EMAIL_TO }}
+          PROXY_HTTP=
+          PROXY_HTTPS=
+          OUTPUT_DIR=output
+          SCHEDULE_TIME=08:30
+          LOG_LEVEL=INFO
+          EOF
+
+      - name: 采集 + 生成海报 + 邮件推送
+        run: python -m app.main --once
+
+      # 无论成败都上传当日产物，方便核对海报与排查（7 天后自动过期）
+      - name: 上传当日产物
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: daily-brief-${{ github.run_id }}
+          path: |
+            output/daily_brief_*.md
+            output/daily_brief_*.html
+            output/daily_brief_*.json
+            output/daily_brief_*.pdf
+          if-no-files-found: ignore
+          retention-days: 7

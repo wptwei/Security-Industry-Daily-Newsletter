@@ -1,0 +1,25 @@
+# 密钥与本地配置（绝不上传）
+.env
+
+# 运行时生成物
+output/
+logs/
+_tmp_out/
+run_log.txt
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# 依赖与工具
+node_modules/
+
+# IDE
+.vscode/
+.idea/

@@ -1,0 +1,7 @@
+requests>=2.26
+schedule>=1.1
+python-dotenv>=0.20
+feedparser>=6.0
+openai>=1.0
+reportlab>=4.0
+pytest>=6.2
