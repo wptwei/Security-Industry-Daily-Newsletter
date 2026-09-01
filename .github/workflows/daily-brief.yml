@@ -66,11 +66,11 @@ jobs:
           USGS_MIN_MAG=4.5
           USGS_LIMIT=20
           CISA_LIMIT=10
-          RSS_FEEDS=http://feeds.bbci.co.uk/news/world/rss.xml|geopolitical,https://www.aljazeera.com/xml/rss/all.xml|geopolitical,https://www.theguardian.com/world/rss|geopolitical,https://securityjournaluk.com/feed/|personnel,https://internationalsecurityjournal.com/feed/|personnel,https://securitylinkindia.com/feed/|personnel,https://www.revistasegurancaeletronica.com.br/feed/|personnel,https://www.send2press.com/wire/technology-news/security-tech-news/feed/|personnel,https://facilityexecutive.com/feed/|personnel,https://security.world/feed/|personnel
+          RSS_FEEDS=http://feeds.bbci.co.uk/news/world/rss.xml|geopolitical,https://www.aljazeera.com/xml/rss/all.xml|geopolitical,https://www.theguardian.com/world/rss|geopolitical,https://securityjournaluk.com/feed/|personnel,https://internationalsecurityjournal.com/feed/|personnel,https://securitylinkindia.com/feed/|personnel,https://www.revistasegurancaeletronica.com.br/feed/|personnel,https://www.send2press.com/wire/technology-news/security-tech-news/feed/|personnel,https://facilityexecutive.com/feed/|personnel,https://security.world/feed/|personnel,https://news.google.com/rss/search?q=%22physical+security%22&hl=en-US&gl=US&ceid=US:en|personnel,https://news.google.com/rss/search?q=%22access+control%22+security&hl=en-US&gl=US&ceid=US:en|personnel,https://news.google.com/rss/search?q=%22video+surveillance%22&hl=en-US&gl=US&ceid=US:en|personnel,https://news.google.com/rss/search?q=%22security+camera%22&hl=en-US&gl=US&ceid=US:en|personnel,https://news.google.com/rss/search?q=%22perimeter+security%22&hl=en-US&gl=US&ceid=US:en|personnel,https://news.google.com/rss/search?q=%E5%AE%89%E9%98%B2&hl=zh-CN&gl=CN&ceid=CN:zh-Hans|personnel,https://news.google.com/rss/search?q=%E6%B5%B7%E5%BA%B7%E5%A8%81%E8%A7%86&hl=zh-CN&gl=CN&ceid=CN:zh-Hans|personnel,https://news.google.com/rss/search?q=%E5%A4%A7%E5%8D%8E%E8%82%A1%E4%BB%BD&hl=zh-CN&gl=CN&ceid=CN:zh-Hans|personnel,https://news.google.com/rss/search?q=%E5%AE%87%E8%A7%86&hl=zh-CN&gl=CN&ceid=CN:zh-Hans|personnel,https://news.google.com/rss/search?q=%E5%AE%89%E9%98%B2&hl=zh-TW&gl=TW&ceid=TW:zh-Hant|personnel
           RSS_LIMIT=15
           FILTER_POSITIVE=physical security,access control,perimeter,surveillance,intrusion detection,critical infrastructure,周界,门禁,视频监控,实体防护,物防技防,入侵探测
           FILTER_NEGATIVE=cyber security,vulnerability,exploit,malware,漏洞,病毒,渗透,网络攻击
-          TOP_N=10
+          TOP_N=15
           EMERGENCY_QUOTA=2
           DEDUP_DAYS=7
           SEVERITY_HIGHLIGHT=4

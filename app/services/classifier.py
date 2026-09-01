@@ -99,12 +99,33 @@ NEGATIVE_KEYWORDS = (
     "网络攻击", "勒索软件", "黑客",
 )
 
+# 繁体中文（港台）关键词补充：gl=TW/HK 源返回繁体，简体关键词命中不了，
+# 这里补常用繁体变体，避免繁体物理安防新闻被误过滤 / 繁体网络噪音漏过。
+TRADITIONAL_POSITIVE = (
+    # 災害
+    "颱風", "颶風", "海嘯", "山崩", "土石流", "乾旱", "豪雨", "山體滑坡",
+    # 恐襲/衝突/騷亂
+    "恐襲", "恐怖襲擊", "戰爭", "衝突", "導彈", "軍事", "空襲", "炮擊",
+    "抗議", "騷亂", "政變", "罷工", "暴亂", "襲擊", "傷亡", "遇難", "槍擊",
+    # 人身/資產安全
+    "綁架", "人質", "搶劫", "撤離", "領事提醒",
+    # 安防行業/產品/企業
+    "監控", "攝影機", "攝像頭", "門禁", "報警", "視頻監控",
+    "人臉識別", "人臉辨識", "生物識別", "生物辨識", "入侵偵測", "入侵檢測",
+    "實體防護", "關鍵基礎設施", "保全", "防盜",
+)
+
+TRADITIONAL_NEGATIVE = (
+    "資安", "網路安全", "駭客", "網路攻擊", "勒索軟體", "資料外洩",
+    "網路釣魚", "惡意程式",
+)
+
 
 class Classifier:
     def __init__(self, extra_positive: tuple = (), extra_negative: tuple = ()) -> None:
         """可注入额外正/负向关键词（来自配置 FILTER_POSITIVE / FILTER_NEGATIVE）。"""
-        self.positive_keywords = PHYSICAL_KEYWORDS + tuple(extra_positive)
-        self.negative_keywords = NEGATIVE_KEYWORDS + tuple(extra_negative)
+        self.positive_keywords = PHYSICAL_KEYWORDS + TRADITIONAL_POSITIVE + tuple(extra_positive)
+        self.negative_keywords = NEGATIVE_KEYWORDS + TRADITIONAL_NEGATIVE + tuple(extra_negative)
 
     def classify(self, event: SecurityEvent) -> str:
         if event.source in AUTHORITATIVE_SOURCES and event.category in CATEGORIES:
