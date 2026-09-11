@@ -34,10 +34,16 @@ jobs:
 
       # 云端生成海报 PDF 依赖 Chromium 无头打印，需要系统中文字体与 emoji 字体，
       # 否则中文会渲染成方框/乱码。ubuntu runner 预装 Google Chrome（_find_browser 会找到它）。
-      - name: 安装中文字体
+      - name: 安装中文字体与浏览器
         run: |
           sudo apt-get update
-          sudo apt-get install -y fonts-noto-cjk fonts-noto-color-emoji
+          sudo apt-get install -y fonts-noto-cjk fonts-noto-color-emoji fonts-wqy-microhei
+          # 确保 Google Chrome 存在（路径兜底，通常 ubuntu runner 已预装）
+          if ! command -v google-chrome >/dev/null 2>&1 && ! command -v google-chrome-stable >/dev/null 2>&1; then
+            wget -q -O /tmp/google-chrome.deb https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb
+            sudo apt-get install -y /tmp/google-chrome.deb || sudo dpkg -i /tmp/google-chrome.deb || true
+          fi
+          sudo fc-cache -f
 
       # 跨天去重依赖 output/history.json。用缓存恢复最近一次的历史，
       # 运行结束后自动写回，这样「N 天内不重复上报」在云端也能生效。

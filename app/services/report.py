@@ -58,6 +58,42 @@ def _find_browser() -> str:
     return ""
 
 
+def _register_embedded_cjk_font() -> str:
+    """跨平台注册一个可内嵌的中文字体，返回字体名；找不到则返回空串。
+
+    reportlab 的 UnicodeCIDFont（如 STSong-Light）生成的 PDF 只引用字体名、
+    不内嵌字形，在无对应字体的阅读器上会显示乱码。这里改为内嵌 TrueType 中文字体，
+    让任何阅读器都能正确显示中文。
+    """
+    import platform
+
+    from reportlab.pdfbase import pdfmetrics  # pyright: ignore[reportMissingModuleSource]
+    from reportlab.pdfbase.ttfonts import TTFont  # pyright: ignore[reportMissingModuleSource]
+
+    system = platform.system()
+    if system == "Windows":
+        candidates = [
+            (r"C:\Windows\Fonts\msyh.ttc", 0),     # 微软雅黑
+            (r"C:\Windows\Fonts\simsun.ttc", 0),   # 宋体
+            (r"C:\Windows\Fonts\simhei.ttf", 0),   # 黑体
+        ]
+    else:
+        candidates = [
+            ("/usr/share/fonts/truetype/wqy/wqy-microhei.ttc", 0),
+            ("/usr/share/fonts/truetype/droid/DroidSansFallbackFull.ttf", 0),
+            ("/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc", 2),
+        ]
+    for path, subfont in candidates:
+        if not Path(path).exists():
+            continue
+        try:
+            pdfmetrics.registerFont(TTFont("CJKEmbed", path, subfontIndex=subfont))
+            return "CJKEmbed"
+        except Exception:
+            continue
+    return ""
+
+
 class ReportService:
     def __init__(self, output_dir: Path, severity_highlight: int = 4) -> None:
         self.output_dir = Path(output_dir)
@@ -361,12 +397,15 @@ body{{font-family:-apple-system,"Segoe UI","Microsoft YaHei","PingFang SC",sans-
         from reportlab.pdfbase.cidfonts import UnicodeCIDFont  # pyright: ignore[reportMissingModuleSource]
         from reportlab.platypus import HRFlowable, Paragraph, SimpleDocTemplate  # pyright: ignore[reportMissingModuleSource]
 
-        pdfmetrics.registerFont(UnicodeCIDFont("STSong-Light"))
+        font_name = _register_embedded_cjk_font()
+        if not font_name:
+            pdfmetrics.registerFont(UnicodeCIDFont("STSong-Light"))
+            font_name = "STSong-Light"
 
-        title_style = ParagraphStyle("title", fontName="STSong-Light", fontSize=18, leading=24, spaceAfter=8)
-        h2_style = ParagraphStyle("h2", fontName="STSong-Light", fontSize=13, leading=18, spaceBefore=12, spaceAfter=5, textColor=colors.HexColor("#c0392b"))
-        body_style = ParagraphStyle("body", fontName="STSong-Light", fontSize=10, leading=16)
-        item_style = ParagraphStyle("item", fontName="STSong-Light", fontSize=10, leading=16, leftIndent=10, spaceAfter=3)
+        title_style = ParagraphStyle("title", fontName=font_name, fontSize=18, leading=24, spaceAfter=8)
+        h2_style = ParagraphStyle("h2", fontName=font_name, fontSize=13, leading=18, spaceBefore=12, spaceAfter=5, textColor=colors.HexColor("#c0392b"))
+        body_style = ParagraphStyle("body", fontName=font_name, fontSize=10, leading=16)
+        item_style = ParagraphStyle("item", fontName=font_name, fontSize=10, leading=16, leftIndent=10, spaceAfter=3)
 
         def esc(s):
             return _xml_escape(s or "")
