@@ -178,6 +178,23 @@ class ReportService:
         # 研判区块（清理 markdown 残留，统一为干净段落）
         assess_html = esc(self._clean_assess(assess)).replace("\n", "<br/>")
 
+        # 打印时动态把 @page 尺寸设为海报内容实际宽高，使 PDF 输出为一张完整长图（不分页）
+        fit_script = """<script>
+(function () {
+  function fit() {
+    var page = document.querySelector('.page');
+    var w = page ? Math.ceil(page.offsetWidth) : 780;
+    var h = Math.ceil(document.documentElement.scrollHeight);
+    var st = document.getElementById('__page_size');
+    if (!st) { st = document.createElement('style'); st.id = '__page_size'; document.head.appendChild(st); }
+    st.textContent = '@page { size: ' + w + 'px ' + h + 'px; margin: 0; }';
+  }
+  window.addEventListener('load', fit);
+  setTimeout(fit, 120);
+  setTimeout(fit, 350);
+})();
+</script>"""
+
         return f"""<!DOCTYPE html>
 <html lang="zh"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -231,6 +248,10 @@ body{{font-family:-apple-system,"Segoe UI","Microsoft YaHei","PingFang SC",sans-
 /* 底部 */
 .footer{{text-align:center;color:#a2abb8;font-size:11px;margin-top:28px;line-height:1.9}}
 .footer .line{{display:inline-block;width:60px;height:2px;background:#d5dbe4;border-radius:2px;margin-bottom:14px}}
+
+/* 打印：去默认页边距、body 内边距归零，让 PDF 铺满海报画布、背景贯通 */
+@page{{margin:0}}
+@media print{{body{{padding:0}}}}
 </style></head><body>
 <div class="page">
   <div class="header">
@@ -252,6 +273,7 @@ body{{font-family:-apple-system,"Segoe UI","Microsoft YaHei","PingFang SC",sans-
     🤖 AI 摘要引擎 · 全文已内嵌 · 内部参考 · {datetime.now().year}
   </div>
 </div>
+{fit_script}
 </body></html>"""
 
     def _poster_item_html(self, e: SecurityEvent) -> str:
@@ -297,6 +319,7 @@ body{{font-family:-apple-system,"Segoe UI","Microsoft YaHei","PingFang SC",sans-
                 "--disable-gpu",
                 "--no-sandbox",
                 "--no-pdf-header-footer",
+                "--virtual-time-budget=3000",
                 "--print-to-pdf=" + str(tmp_pdf),
                 "file:///" + str(tmp_html).replace("\\", "/"),
             ]
