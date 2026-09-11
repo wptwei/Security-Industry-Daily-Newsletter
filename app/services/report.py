@@ -36,12 +36,21 @@ SECTOR_META = {
 
 
 def _find_browser() -> str:
-    """定位可用的 Chromium 内核浏览器（Edge / Chrome），用于 HTML 转 PDF。"""
+    """定位可用的 Chromium 内核浏览器（Edge / Chrome / Chromium），用于 HTML 转 PDF。"""
     candidates = [
+        # Windows
         r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe",
         r"C:\Program Files\Microsoft\Edge\Application\msedge.exe",
         r"C:\Program Files\Google\Chrome\Application\chrome.exe",
         r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
+        # Linux（GitHub Actions ubuntu runner 等）
+        "/usr/bin/google-chrome",
+        "/usr/bin/google-chrome-stable",
+        "/usr/bin/chromium",
+        "/usr/bin/chromium-browser",
+        # macOS
+        "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+        "/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge",
     ]
     for c in candidates:
         if Path(c).exists():
@@ -318,6 +327,7 @@ body{{font-family:-apple-system,"Segoe UI","Microsoft YaHei","PingFang SC",sans-
                 "--headless",
                 "--disable-gpu",
                 "--no-sandbox",
+                "--disable-dev-shm-usage",
                 "--no-pdf-header-footer",
                 "--virtual-time-budget=3000",
                 "--print-to-pdf=" + str(tmp_pdf),
