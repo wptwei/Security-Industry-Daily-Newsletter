@@ -151,7 +151,7 @@ schtasks /Create /TN "SecurityIntelDailyBrief" /TR "\"C:\vscode project\security
 
 注意事项：
 
-- **海报 PDF**：云端无 Edge/Chrome，会自动回退 reportlab 生成简洁版 PDF（内容完整，仅样式简单些）。
+- **海报 PDF**：工作流会显式安装 Google Chrome + 中文字体，云端同样用 Chrome 无头打印生成与海报配色一致的长图 PDF；若浏览器不可用，会自动回退 reportlab 的「海报配色版」（深蓝标题、彩色分类头，颜色与海报同步，仅无渐变/圆角/emoji）。
 - **跨天去重**：通过 Actions 缓存持久化 `history.json`，云端也能「N 天内不重复上报」。
 - **改运行频率**：编辑工作流里的 `cron`；想每天（含周末）跑就把 `1-5` 改成 `*`。
 - **免费额度**：public 仓库 Actions 免费不限量；private 仓库每月 2000 分钟（每天约 2-3 分钟，够用）。

@@ -37,6 +37,16 @@ SECTOR_META = {
 
 def _find_browser() -> str:
     """定位可用的 Chromium 内核浏览器（Edge / Chrome / Chromium），用于 HTML 转 PDF。"""
+    import shutil
+
+    # 1) 优先走 PATH 查找（对 Linux/macOS 的符号链接、snap、自定义安装最稳健）
+    for name in ("google-chrome", "google-chrome-stable", "chromium", "chromium-browser",
+                 "chrome", "msedge", "microsoft-edge", "chromium.exe", "chrome.exe", "msedge.exe"):
+        found = shutil.which(name)
+        if found:
+            return found
+
+    # 2) 再按常见绝对路径兜底
     candidates = [
         # Windows
         r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe",
@@ -48,6 +58,10 @@ def _find_browser() -> str:
         "/usr/bin/google-chrome-stable",
         "/usr/bin/chromium",
         "/usr/bin/chromium-browser",
+        "/opt/google/chrome/chrome",
+        "/opt/google/chrome/google-chrome",
+        "/snap/bin/chromium",
+        "/snap/bin/google-chrome",
         # macOS
         "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
         "/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge",
@@ -354,9 +368,10 @@ body{{font-family:-apple-system,"Segoe UI","Microsoft YaHei","PingFang SC",sans-
 
         browser = _find_browser()
         if not browser:
-            logger.warning("未找到 Edge/Chrome，回退 reportlab 生成 PDF")
+            logger.warning("未找到 Edge/Chrome，回退 reportlab 生成 PDF（配色为简洁版）")
             return self._render_pdf_reportlab(events, assess)
 
+        logger.info("使用浏览器 %s 生成海报 PDF", browser)
         try:
             cmd = [
                 browser,
@@ -369,11 +384,16 @@ body{{font-family:-apple-system,"Segoe UI","Microsoft YaHei","PingFang SC",sans-
                 "--print-to-pdf=" + str(tmp_pdf),
                 "file:///" + str(tmp_html).replace("\\", "/"),
             ]
-            subprocess.run(cmd, timeout=60, check=True, capture_output=True)
+            subprocess.run(cmd, timeout=90, check=True, capture_output=True)
             if not tmp_pdf.exists():
                 raise FileNotFoundError(f"浏览器未生成 PDF：{tmp_pdf}")
             pdf_bytes = tmp_pdf.read_bytes()
+            logger.info("海报 PDF 已生成（%d 字节）", len(pdf_bytes))
             return pdf_bytes
+        except subprocess.CalledProcessError as exc:
+            err = (exc.stderr or b"").decode("utf-8", errors="ignore").strip()[-400:]
+            logger.warning("浏览器转 PDF 失败（退出码 %s），stderr: %s，回退 reportlab", exc.returncode, err)
+            return self._render_pdf_reportlab(events, assess)
         except Exception as exc:
             logger.warning("浏览器转 PDF 失败（%s），回退 reportlab", exc)
             return self._render_pdf_reportlab(events, assess)
@@ -385,7 +405,11 @@ body{{font-family:-apple-system,"Segoe UI","Microsoft YaHei","PingFang SC",sans-
                     pass
 
     def _render_pdf_reportlab(self, events: List[SecurityEvent], assess: str) -> bytes:
-        """reportlab 兜底 PDF（简洁版）。"""
+        """reportlab 兜底 PDF（海报配色版，尽量与 HTML 海报颜色一致）。
+
+        无法在 reportlab 里复刻渐变/圆角/emoji，但会复用海报的配色：深蓝标题、
+        红色研判块、彩色分类头、严重度色块，确保「邮件附件 PDF」与海报观感同步。
+        """
         from io import BytesIO
         from xml.sax.saxutils import escape as _xml_escape
 
@@ -395,37 +419,98 @@ body{{font-family:-apple-system,"Segoe UI","Microsoft YaHei","PingFang SC",sans-
         from reportlab.lib.units import mm  # pyright: ignore[reportMissingModuleSource]
         from reportlab.pdfbase import pdfmetrics  # pyright: ignore[reportMissingModuleSource]
         from reportlab.pdfbase.cidfonts import UnicodeCIDFont  # pyright: ignore[reportMissingModuleSource]
-        from reportlab.platypus import HRFlowable, Paragraph, SimpleDocTemplate  # pyright: ignore[reportMissingModuleSource]
+        from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle  # pyright: ignore[reportMissingModuleSource]
 
         font_name = _register_embedded_cjk_font()
         if not font_name:
             pdfmetrics.registerFont(UnicodeCIDFont("STSong-Light"))
             font_name = "STSong-Light"
 
-        title_style = ParagraphStyle("title", fontName=font_name, fontSize=18, leading=24, spaceAfter=8)
-        h2_style = ParagraphStyle("h2", fontName=font_name, fontSize=13, leading=18, spaceBefore=12, spaceAfter=5, textColor=colors.HexColor("#c0392b"))
-        body_style = ParagraphStyle("body", fontName=font_name, fontSize=10, leading=16)
-        item_style = ParagraphStyle("item", fontName=font_name, fontSize=10, leading=16, leftIndent=10, spaceAfter=3)
+        # 与海报 CSS 一致的关键配色
+        HEADER_BG = colors.HexColor("#1a2b4a")
+        ASSESS_RED = colors.HexColor("#c0392b")
+        ASSESS_BG = colors.HexColor("#fdf3f3")
+        BODY = colors.HexColor("#4a4f57")
+        SUM = colors.HexColor("#565b64")
+        TITLE_DARK = colors.HexColor("#1c1f26")
+        WHITE = colors.white
+
+        title_style = ParagraphStyle("title", fontName=font_name, fontSize=20, leading=26, textColor=WHITE)
+        sub_style = ParagraphStyle("sub", fontName=font_name, fontSize=10, leading=14, textColor=WHITE)
+        stats_style = ParagraphStyle("stats", fontName=font_name, fontSize=10, leading=14, textColor=WHITE)
+        assess_title = ParagraphStyle("assess_title", fontName=font_name, fontSize=13, leading=18, textColor=ASSESS_RED, spaceAfter=6)
+        assess_body = ParagraphStyle("assess_body", fontName=font_name, fontSize=10, leading=16, textColor=BODY)
+        sector_style = ParagraphStyle("sector", fontName=font_name, fontSize=12, leading=16, textColor=WHITE)
+        item_style = ParagraphStyle("item", fontName=font_name, fontSize=10, leading=15, spaceAfter=5, textColor=TITLE_DARK)
 
         def esc(s):
             return _xml_escape(s or "")
 
-        story = [Paragraph(f"安防行业日报 · {self._date_str()}", title_style),
-                 HRFlowable(width="100%", thickness=1, color=colors.HexColor("#333333")),
-                 Paragraph("今日态势研判", h2_style),
-                 Paragraph(esc(assess).replace("\n", "<br/>"), body_style)]
+        # A4 可用宽度 = 210 - 20*2 = 170mm
+        width = 170 * mm
+        story = []
 
+        # 头部（深蓝背景，白字）
+        date_cn = self._date_cn()
+        sectors = {e.sector for e in events}
+        header = Table([
+            [Paragraph(f"安防行业日报 · {self._date_str()}", title_style)],
+            [Paragraph(f"{date_cn} · 物理安防重点 · 精准精选", sub_style)],
+            [Paragraph(f"{len(events)} 条精选　·　{len(sectors)} 大类别　·　AI 摘要", stats_style)],
+        ], colWidths=[width])
+        header.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, -1), HEADER_BG),
+            ("LEFTPADDING", (0, 0), (-1, -1), 14),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 14),
+            ("TOPPADDING", (0, 0), (-1, -1), 10),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 10),
+            ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ]))
+        story.append(header)
+        story.append(Spacer(1, 6 * mm))
+
+        # 研判区块（浅红背景 + 红色左边线）
+        assess_clean = esc(self._clean_assess(assess)).replace("\n", "<br/>")
+        assess_block = Table([
+            [Paragraph("今日态势研判", assess_title)],
+            [Paragraph(assess_clean, assess_body)],
+        ], colWidths=[width])
+        assess_block.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, -1), ASSESS_BG),
+            ("LINEBEFORE", (0, 0), (0, -1), 3, ASSESS_RED),
+            ("LEFTPADDING", (0, 0), (-1, -1), 14),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 14),
+            ("TOPPADDING", (0, 0), (-1, -1), 10),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 10),
+            ("VALIGN", (0, 0), (-1, -1), "TOP"),
+        ]))
+        story.append(assess_block)
+        story.append(Spacer(1, 6 * mm))
+
+        # 分类卡片（彩色分类头 + 条目）
         grouped = self._group_by_sector(events)
         for sector, items in grouped.items():
-            meta = SECTOR_META.get(sector, {"icon": "", "color": "#333"})
+            meta = SECTOR_META.get(sector, {"color": "#2c3e50"})
+            color = colors.HexColor(meta["color"])
             label = items[0].sector_label if items else sector
-            story.append(Paragraph(f"{meta['icon']} {esc(label)}（{len(items)} 条）", h2_style))
+            sec_head = Table([[Paragraph(f"{esc(label)}（{len(items)} 条）", sector_style)]], colWidths=[width])
+            sec_head.setStyle(TableStyle([
+                ("BACKGROUND", (0, 0), (-1, -1), color),
+                ("LEFTPADDING", (0, 0), (-1, -1), 12),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 12),
+                ("TOPPADDING", (0, 0), (-1, -1), 6),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
+            ]))
+            story.append(sec_head)
+            story.append(Spacer(1, 2 * mm))
             for e in items:
                 sev_color = SEV_COLORS.get(e.severity, "#000")
                 story.append(Paragraph(
-                    f'• <font color="{sev_color}">[{esc(e.severity_label)}]</font> {esc(e.title)}<br/>{esc(e.summary)}',
+                    f'<font color="{sev_color}"><b>[{esc(e.severity_label)}]</b></font> {esc(e.title)}<br/>'
+                    f'<font color="#565b64">{esc(e.summary)}</font>',
                     item_style,
                 ))
+            story.append(Spacer(1, 4 * mm))
 
         buf = BytesIO()
         doc = SimpleDocTemplate(buf, pagesize=A4, leftMargin=20 * mm, rightMargin=20 * mm, topMargin=18 * mm, bottomMargin=18 * mm)
