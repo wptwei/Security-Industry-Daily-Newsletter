@@ -125,8 +125,13 @@ class BriefAgent:
 
         markdown_text = self.report.render_markdown(events, assess)
         paths = self.report.write_files(events, assess, markdown_text=markdown_text)
-        html_text = paths["html"].read_text(encoding="utf-8")
-        _ = self.pusher.push(markdown_text, html_text, paths["date"], pdf_path=paths.get("pdf"))  # pyright: ignore[reportArgumentType]
+        # 邮件正文：优先内嵌海报长图（Outlook/QQ 像素一致），失败则退回表格版
+        email_html = self.report.render_email_html(events, assess)
+        poster_png = self.report.render_poster_image(events, assess)
+        # 无论 SMTP 是否可用，都生成 .eml 草稿文件 + 写入 Outlook 草稿箱（可编辑），便于手动发送
+        self.pusher.save_eml(markdown_text, email_html, paths["date"], pdf_path=paths.get("pdf"), poster_png=poster_png)
+        self.pusher.save_outlook_draft(email_html, paths["date"], pdf_path=paths.get("pdf"), poster_png=poster_png)
+        _ = self.pusher.push(markdown_text, email_html, paths["date"], pdf_path=paths.get("pdf"), poster_png=poster_png)  # pyright: ignore[reportArgumentType]
 
         self.dedup.mark_seen(events)
         self.dedup.save()

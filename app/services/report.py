@@ -8,7 +8,7 @@ from __future__ import annotations
 import html
 import json
 import subprocess
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Dict, List
 
@@ -17,12 +17,12 @@ from app.utils.logging import get_logger
 
 logger = get_logger("report")
 
+# 日报日期统一用北京时间（UTC+8），与机器/云端时区无关
+BEIJING_TZ = timezone(timedelta(hours=8))
+
 # 严重度颜色
 SEV_COLORS = {5: "#c0392b", 4: "#e67e22", 3: "#d4a017", 2: "#27ae60", 1: "#95a5a6"}
 SEV_BG = {5: "#fdecea", 4: "#fef3e2", 3: "#fdf6e3", 2: "#eafaf1", 1: "#f2f3f4"}
-
-# 低于该严重度的条目进入「简讯速览」一行呈现，不占用管理层注意力
-BRIEF_MAX_SEVERITY = 2
 
 # 行业子类图标与颜色
 SECTOR_META = {
@@ -119,11 +119,11 @@ class ReportService:
 
     @staticmethod
     def _date_str() -> str:
-        return datetime.now().strftime("%Y-%m-%d")
+        return datetime.now(BEIJING_TZ).strftime("%Y-%m-%d")
 
     @staticmethod
     def _date_cn() -> str:
-        now = datetime.now()
+        now = datetime.now(BEIJING_TZ)
         weekdays = ["星期一", "星期二", "星期三", "星期四", "星期五", "星期六", "星期日"]
         return f"{now.year}年{now.month}月{now.day}日 {weekdays[now.weekday()]}"
 
@@ -133,13 +133,6 @@ class ReportService:
         for e in events:
             grouped.setdefault(e.sector, []).append(e)
         return grouped
-
-    @staticmethod
-    def _split_depth(events: List[SecurityEvent]) -> "tuple":
-        """按严重度拆分：>=3 详读，<=2 进入简讯速览。"""
-        detailed = [e for e in events if e.severity > BRIEF_MAX_SEVERITY]
-        brief = [e for e in events if e.severity <= BRIEF_MAX_SEVERITY]
-        return detailed, brief
 
     # ---------- Markdown ----------
     def render_markdown(self, events: List[SecurityEvent], assess: str) -> str:
@@ -152,8 +145,7 @@ class ReportService:
             assess,
             "",
         ]
-        detailed, brief = self._split_depth(events)
-        grouped = self._group_by_sector(detailed)
+        grouped = self._group_by_sector(events)
         for sector, items in grouped.items():
             icon = SECTOR_META.get(sector, {}).get("icon", "🔍")
             label = items[0].sector_label if items else sector
@@ -161,12 +153,6 @@ class ReportService:
             lines.append("")
             for e in items:
                 lines.append(self._markdown_item(e))
-            lines.append("")
-        if brief:
-            lines.append(f"## 📌 简讯速览（{len(brief)} 条）")
-            lines.append("")
-            for e in brief:
-                lines.append(f"- {e.title}")
             lines.append("")
         lines.append("## 数据来源")
         lines.append("")
@@ -229,9 +215,8 @@ class ReportService:
             f'<div class="badge">🤖 AI 摘要</div>'
         )
 
-        # 分组卡片：严重度 >=3 详读，<=2 汇总为「简讯速览」
-        detailed, brief = self._split_depth(events)
-        grouped = self._group_by_sector(detailed)
+        # 分组卡片
+        grouped = self._group_by_sector(events)
         cards = []
         for sector, items in grouped.items():
             meta = SECTOR_META.get(sector, {"icon": "🔍", "color": "#2c3e50"})
@@ -251,8 +236,6 @@ class ReportService:
                 f'<div class="sector-body">{"".join(items_html)}</div>'
                 f'</div>'
             )
-        if brief:
-            cards.append(self._brief_block_html(brief))
 
         # 研判区块（清理 markdown 残留，统一为干净段落）
         assess_html = esc(self._clean_assess(assess)).replace("\n", "<br/>")
@@ -308,11 +291,6 @@ body{{font-family:-apple-system,"Segoe UI","Microsoft YaHei","PingFang SC",sans-
 .sector-count{{font-size:12px;font-weight:600;background:rgba(255,255,255,.22);border-radius:14px;padding:3px 14px}}
 .sector-body{{padding:6px 18px}}
 
-/* 简讯速览 */
-.brief-body{{padding:12px 24px 16px}}
-.brief-item{{font-size:13px;color:#4a4f57;line-height:1.9;display:flex;gap:8px}}
-.brief-dot{{color:#a2abb8;flex-shrink:0}}
-
 /* 单条卡片 */
 .item{{padding:16px 6px;border-bottom:1px solid #f1f2f5}}
 .item:last-child{{border-bottom:none}}
@@ -354,7 +332,7 @@ body{{font-family:-apple-system,"Segoe UI","Microsoft YaHei","PingFang SC",sans-
   <div class="footer">
     <span class="line"></span><br>
     🌐 数据来源：{"、".join(sorted({e.source for e in events}))}<br>
-    🤖 AI 摘要引擎 · 全文已内嵌 · 内部参考 · {datetime.now().year}
+    🤖 AI 摘要引擎 · 全文已内嵌 · 内部参考 · {datetime.now(BEIJING_TZ).year}
   </div>
 </div>
 {fit_script}
@@ -378,28 +356,130 @@ body{{font-family:-apple-system,"Segoe UI","Microsoft YaHei","PingFang SC",sans-
             f'</div>'
         )
 
-    @staticmethod
-    def _brief_block_html(items: List[SecurityEvent]) -> str:
-        """简讯速览：低严重度条目以标题级一行呈现。"""
+    # ---------- 邮件正文 HTML（Outlook 兼容：表格布局 + 内联样式 + 纯色，无 flex/渐变/圆角） ----------
+    def render_email_html(self, events: List[SecurityEvent], assess: str) -> str:
+        """生成 Outlook 可正常渲染的邮件正文。
+
+        Outlook 桌面版用 Word 引擎渲染 HTML，不支持 flexbox / CSS 渐变 / 圆角 /
+        box-shadow / CSS 变量，会令海报版 HTML 布局塌陷、渐变头变白底白字。
+        这里改用 <table> 布局 + 内联样式 + 纯色 bgcolor，确保多端一致、可读。
+        """
         esc = html.escape
-        lines = "".join(
-            f'<div class="brief-item"><span class="brief-dot">•</span>{esc(e.title)}</div>'
-            for e in items
-        )
+        date_cn = self._date_cn()
+
+        def _head(color: str, icon: str, label: str, count: int) -> str:
+            return (
+                f'<tr><td bgcolor="{color}" '
+                f'style="padding:10px 16px;color:#ffffff;font-size:14px;font-weight:bold;">'
+                f'{icon} {esc(label)}（{count} 条）</td></tr>'
+            )
+
+        rows: List[str] = []
+        grouped = self._group_by_sector(events)
+        for sector, items in grouped.items():
+            meta = SECTOR_META.get(sector, {"icon": "🔍", "color": "#2c3e50"})
+            rows.append(_head(meta["color"], meta["icon"], items[0].sector_label if items else sector, len(items)))
+            for e in items:
+                sev_color = SEV_COLORS.get(e.severity, "#000000")
+                tag = f'<span style="color:#8a94a3;font-size:11px;"> {esc(e.tag_label())}</span>' if e.tag_label() else ""
+                rows.append(
+                    f'<tr><td style="padding:10px 16px;border-bottom:1px solid #eef0f4;">'
+                    f'<span style="color:{sev_color};font-weight:bold;">[{esc(e.severity_label)}]</span> '
+                    f'<strong style="color:#1c1f26;font-size:13px;">{esc(e.title)}</strong>{tag}<br/>'
+                    f'<span style="color:#565b64;font-size:12px;line-height:1.7;">{esc(e.summary)}</span>'
+                    f'</td></tr>'
+                )
+
+        assess_html = esc(self._clean_assess(assess)).replace("\n", "<br/>")
         return (
-            f'<div class="sector-block brief-block">'
-            f'<div class="sector-head" style="background:linear-gradient(120deg,#7f8c8d,rgba(0,0,0,0))">'
-            f'<span class="sector-icon" style="background:rgba(255,255,255,.22)">📌</span>'
-            f'<span class="sector-title">简讯速览</span>'
-            f'<span class="sector-count">{len(items)}条</span>'
-            f'</div>'
-            f'<div class="brief-body">{lines}</div>'
-            f'</div>'
+            '<!DOCTYPE html><html lang="zh"><head><meta charset="utf-8"></head>'
+            '<body style="margin:0;padding:0;background:#eef1f6;'
+            "font-family:-apple-system,'Segoe UI','Microsoft YaHei','PingFang SC',sans-serif;\">"
+            '<table width="100%" cellpadding="0" cellspacing="0" bgcolor="#eef1f6" style="background:#eef1f6;">'
+            '<tr><td align="center" style="padding:20px 12px;">'
+            '<table width="640" cellpadding="0" cellspacing="0" bgcolor="#ffffff" style="border:1px solid #e6e9ef;">'
+            '<tr><td bgcolor="#1a2b4a" style="padding:22px 28px;color:#ffffff;">'
+            '<div style="font-size:20px;font-weight:bold;">🔍 安防行业日报</div>'
+            f'<div style="font-size:12px;color:#cfd8e3;margin-top:6px;">📅 {date_cn} · 物理安防重点 · 共 {len(events)} 条</div>'
+            '</td></tr>'
+            '<tr><td bgcolor="#fdf3f3" style="padding:16px 28px;border-left:4px solid #c0392b;">'
+            '<div style="color:#c0392b;font-weight:bold;font-size:13px;margin-bottom:8px;">📊 今日态势研判</div>'
+            f'<div style="color:#4a4f57;font-size:13px;line-height:1.8;">{assess_html}</div>'
+            '</td></tr>'
+            + "".join(rows)
+            + '<tr><td style="padding:14px 28px;color:#a2abb8;font-size:11px;text-align:center;">'
+            f"🌐 数据来源：{'、'.join(sorted({e.source for e in events}))}<br/>"
+            '🤖 AI 摘要引擎 · 内部参考 · 详情见 PDF 附件</td></tr>'
+            '</table></td></tr></table></body></html>'
         )
 
-    # ---------- 旧版 HTML（邮件正文，保持简洁） ----------
     def render_html(self, events: List[SecurityEvent], assess: str) -> str:
+        # 本地 .html 存档仍保留海报版；邮件正文用 render_email_html
         return self.render_poster_html(events, assess)
+
+    # ---------- 海报长图 PNG（邮件正文内嵌，保证 Outlook/QQ 像素一致） ----------
+    def render_poster_image(self, events: List[SecurityEvent], assess: str) -> bytes:
+        """把海报 HTML 经无头浏览器截成一张 PNG 长图。
+
+        Outlook 桌面版无法渲染 CSS 渐变/圆角/flex，只有把海报做成图片，
+        才能让 Outlook 与 QQ/网页端显示完全一致。返回 PNG 字节，失败返回 b""。
+        """
+        try:
+            from PIL import Image, ImageChops
+        except Exception as exc:
+            logger.warning("缺少 Pillow，无法生成海报长图（%s），退回表格版正文", exc)
+            return b""
+
+        browser = _find_browser()
+        if not browser:
+            return b""
+
+        poster_html = self.render_poster_html(events, assess)
+        tmp_html = (self.output_dir / f"_poster_img_{self._date_str()}.html").resolve()
+        tmp_png = (self.output_dir / f"_poster_img_{self._date_str()}.png").resolve()
+        tmp_html.write_text(poster_html, encoding="utf-8")
+
+        try:
+            cmd = [
+                browser,
+                "--headless",
+                "--disable-gpu",
+                "--no-sandbox",
+                "--disable-dev-shm-usage",
+                "--virtual-time-budget=3000",
+                "--hide-scrollbars",
+                "--window-size=780,12000",
+                "--screenshot=" + str(tmp_png),
+                "file:///" + str(tmp_html).replace("\\", "/"),
+            ]
+            subprocess.run(cmd, timeout=90, check=True, capture_output=True)
+            if not tmp_png.exists():
+                return b""
+
+            img = Image.open(tmp_png).convert("RGB")
+            w, h = img.size
+            # 裁掉底部多余空白：与页面底色 #eef1f6 差异超过阈值的像素视为内容
+            bg = Image.new("RGB", img.size, (238, 241, 246))
+            mask = ImageChops.difference(img, bg).convert("L").point(lambda v: 255 if v > 24 else 0)
+            bbox = mask.getbbox()
+            if bbox:
+                bottom = min(bbox[3] + 24, h)
+                img = img.crop((0, 0, w, bottom))
+            from io import BytesIO
+            buf = BytesIO()
+            img.save(buf, "PNG", optimize=True)
+            png_bytes = buf.getvalue()
+            logger.info("海报长图 PNG 已生成（%d 字节）", len(png_bytes))
+            return png_bytes
+        except Exception as exc:
+            logger.warning("海报截图失败（%s），退回表格版正文", exc)
+            return b""
+        finally:
+            for f in (tmp_html, tmp_png):
+                try:
+                    f.unlink(missing_ok=True)
+                except OSError:
+                    pass
 
     # ---------- PDF（海报卡片风，经浏览器无头打印） ----------
     def render_pdf(self, events: List[SecurityEvent], assess: str) -> bytes:
@@ -486,7 +566,6 @@ body{{font-family:-apple-system,"Segoe UI","Microsoft YaHei","PingFang SC",sans-
         assess_body = ParagraphStyle("assess_body", fontName=font_name, fontSize=10, leading=16, textColor=BODY)
         sector_style = ParagraphStyle("sector", fontName=font_name, fontSize=12, leading=16, textColor=WHITE)
         item_style = ParagraphStyle("item", fontName=font_name, fontSize=10, leading=15, spaceAfter=5, textColor=TITLE_DARK)
-        brief_style = ParagraphStyle("brief", fontName=font_name, fontSize=10, leading=14, textColor=BODY)
 
         def esc(s):
             return _xml_escape(s or "")
@@ -532,9 +611,8 @@ body{{font-family:-apple-system,"Segoe UI","Microsoft YaHei","PingFang SC",sans-
         story.append(assess_block)
         story.append(Spacer(1, 6 * mm))
 
-        # 分类卡片（彩色分类头 + 条目）：严重度 >=3 详读，<=2 汇总为简讯速览
-        detailed, brief = self._split_depth(events)
-        grouped = self._group_by_sector(detailed)
+        # 分类卡片（彩色分类头 + 条目）
+        grouped = self._group_by_sector(events)
         for sector, items in grouped.items():
             meta = SECTOR_META.get(sector, {"color": "#2c3e50"})
             color = colors.HexColor(meta["color"])
@@ -556,22 +634,6 @@ body{{font-family:-apple-system,"Segoe UI","Microsoft YaHei","PingFang SC",sans-
                     f'<font color="#565b64">{esc(e.summary)}</font>',
                     item_style,
                 ))
-            story.append(Spacer(1, 4 * mm))
-
-        # 简讯速览（低严重度，一行一条，不展开）
-        if brief:
-            brief_head = Table([[Paragraph(f"简讯速览（{len(brief)} 条）", sector_style)]], colWidths=[width])
-            brief_head.setStyle(TableStyle([
-                ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#7f8c8d")),
-                ("LEFTPADDING", (0, 0), (-1, -1), 12),
-                ("RIGHTPADDING", (0, 0), (-1, -1), 12),
-                ("TOPPADDING", (0, 0), (-1, -1), 6),
-                ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
-            ]))
-            story.append(brief_head)
-            story.append(Spacer(1, 2 * mm))
-            for e in brief:
-                story.append(Paragraph(f"• {esc(e.title)}", brief_style))
             story.append(Spacer(1, 4 * mm))
 
         buf = BytesIO()

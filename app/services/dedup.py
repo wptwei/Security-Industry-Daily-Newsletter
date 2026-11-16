@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import json
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Dict, List
 
@@ -10,6 +10,13 @@ from app.models.event import SecurityEvent
 from app.utils.logging import get_logger
 
 logger = get_logger("dedup")
+
+# 去重日期统一用北京时间（UTC+8），与机器/云端时区无关
+BEIJING_TZ = timezone(timedelta(hours=8))
+
+
+def _today() -> date:
+    return datetime.now(BEIJING_TZ).date()
 
 
 class DedupStore:
@@ -39,7 +46,7 @@ class DedupStore:
             last_date = datetime.strptime(last, "%Y-%m-%d").date()
         except ValueError:
             return False
-        return (date.today() - last_date).days < self.days
+        return (_today() - last_date).days < self.days
 
     def filter(self, events: List[SecurityEvent]) -> List[SecurityEvent]:
         fresh = [e for e in events if not self.is_recent(e.uid)]
@@ -49,13 +56,13 @@ class DedupStore:
         return fresh
 
     def mark_seen(self, events: List[SecurityEvent]) -> None:
-        today = date.today().isoformat()
+        today = _today().isoformat()
         for event in events:
             self._seen[event.uid] = today
         self._prune()
 
     def _prune(self) -> None:
-        cutoff = (date.today() - timedelta(days=self.days)).isoformat()
+        cutoff = (_today() - timedelta(days=self.days)).isoformat()
         self._seen = {uid: d for uid, d in self._seen.items() if d >= cutoff}
 
     def save(self) -> None:

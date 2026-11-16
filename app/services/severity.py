@@ -20,16 +20,6 @@ SEV3 = (
     "受伤", "抗议", "罢工", "冲突", "骚乱", "宵禁",
 )
 
-# 有实质信息量的行业动态（厂商合作/产品发布/市场报告/展会/政策标准等）
-# 从默认「低」提为「中」，使其进入「要点摘要」档，而非「简讯速览」一行。
-INDUSTRY_SIGNAL = (
-    "merger", "acquisition", "acquires", "funding", "investment", "ipo",
-    "partnership", "collaboration", "launch", "unveil", "exhibition",
-    "summit", "conference", "market", "forecast", "standard", "policy",
-    "并购", "收购", "融资", "投资", "上市", "合作", "发布", "推出",
-    "展会", "峰会", "大会", "安博会", "市场", "报告", "预测", "标准", "政策", "调研",
-)
-
 
 class SeverityRater:
     def rate(self, event: SecurityEvent) -> int:
@@ -41,7 +31,5 @@ class SeverityRater:
         if any(kw in text for kw in SEV4):
             return 4
         if any(kw in text for kw in SEV3):
-            return 3
-        if any(kw in text for kw in INDUSTRY_SIGNAL):
             return 3
         return 2
