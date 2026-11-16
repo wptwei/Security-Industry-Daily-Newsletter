@@ -24,6 +24,7 @@ for _stream in (sys.stdout, sys.stderr):
 from app.agents.brief_agent import BriefAgent
 from app.collectors.cisa import CISACollector
 from app.collectors.gdelt import GDELTCollector
+from app.collectors.html import build_html_collectors
 from app.collectors.mfa import MFACollector
 from app.collectors.nvd import NVDCollector
 from app.collectors.reliefweb import ReliefWebCollector
@@ -65,6 +66,8 @@ def build_agent(config: Config) -> BriefAgent:
         )
     if config.enable_mfa:
         collectors.append(MFACollector(config.mfa_feed, config.rss_limit, config.user_agent))
+    # 中文安防门户 HTML 直采（无 RSS 的服务端渲染站点）
+    collectors.extend(build_html_collectors(config.html_sites, config.html_limit, config.http_timeout))
 
     return BriefAgent(
         collectors=collectors,
@@ -85,6 +88,8 @@ def build_agent(config: Config) -> BriefAgent:
         top_n=config.top_n,
         severity_highlight=config.severity_highlight,
         emergency_quota=config.emergency_quota,
+        time_window_hours=config.time_window_hours,
+        max_per_source=config.max_per_source,
     )
 
 

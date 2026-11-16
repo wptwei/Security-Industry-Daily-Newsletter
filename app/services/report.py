@@ -21,6 +21,9 @@ logger = get_logger("report")
 SEV_COLORS = {5: "#c0392b", 4: "#e67e22", 3: "#d4a017", 2: "#27ae60", 1: "#95a5a6"}
 SEV_BG = {5: "#fdecea", 4: "#fef3e2", 3: "#fdf6e3", 2: "#eafaf1", 1: "#f2f3f4"}
 
+# 低于该严重度的条目进入「简讯速览」一行呈现，不占用管理层注意力
+BRIEF_MAX_SEVERITY = 2
+
 # 行业子类图标与颜色
 SECTOR_META = {
     "physical": {"icon": "🏗️", "color": "#2c3e50"},
@@ -131,6 +134,13 @@ class ReportService:
             grouped.setdefault(e.sector, []).append(e)
         return grouped
 
+    @staticmethod
+    def _split_depth(events: List[SecurityEvent]) -> "tuple":
+        """按严重度拆分：>=3 详读，<=2 进入简讯速览。"""
+        detailed = [e for e in events if e.severity > BRIEF_MAX_SEVERITY]
+        brief = [e for e in events if e.severity <= BRIEF_MAX_SEVERITY]
+        return detailed, brief
+
     # ---------- Markdown ----------
     def render_markdown(self, events: List[SecurityEvent], assess: str) -> str:
         date_str = self._date_str()
@@ -142,7 +152,8 @@ class ReportService:
             assess,
             "",
         ]
-        grouped = self._group_by_sector(events)
+        detailed, brief = self._split_depth(events)
+        grouped = self._group_by_sector(detailed)
         for sector, items in grouped.items():
             icon = SECTOR_META.get(sector, {}).get("icon", "🔍")
             label = items[0].sector_label if items else sector
@@ -150,6 +161,12 @@ class ReportService:
             lines.append("")
             for e in items:
                 lines.append(self._markdown_item(e))
+            lines.append("")
+        if brief:
+            lines.append(f"## 📌 简讯速览（{len(brief)} 条）")
+            lines.append("")
+            for e in brief:
+                lines.append(f"- {e.title}")
             lines.append("")
         lines.append("## 数据来源")
         lines.append("")
@@ -212,8 +229,9 @@ class ReportService:
             f'<div class="badge">🤖 AI 摘要</div>'
         )
 
-        # 分组卡片
-        grouped = self._group_by_sector(events)
+        # 分组卡片：严重度 >=3 详读，<=2 汇总为「简讯速览」
+        detailed, brief = self._split_depth(events)
+        grouped = self._group_by_sector(detailed)
         cards = []
         for sector, items in grouped.items():
             meta = SECTOR_META.get(sector, {"icon": "🔍", "color": "#2c3e50"})
@@ -233,6 +251,8 @@ class ReportService:
                 f'<div class="sector-body">{"".join(items_html)}</div>'
                 f'</div>'
             )
+        if brief:
+            cards.append(self._brief_block_html(brief))
 
         # 研判区块（清理 markdown 残留，统一为干净段落）
         assess_html = esc(self._clean_assess(assess)).replace("\n", "<br/>")
@@ -287,6 +307,11 @@ body{{font-family:-apple-system,"Segoe UI","Microsoft YaHei","PingFang SC",sans-
 .sector-title{{font-size:17px;font-weight:700;flex:1;letter-spacing:.5px}}
 .sector-count{{font-size:12px;font-weight:600;background:rgba(255,255,255,.22);border-radius:14px;padding:3px 14px}}
 .sector-body{{padding:6px 18px}}
+
+/* 简讯速览 */
+.brief-body{{padding:12px 24px 16px}}
+.brief-item{{font-size:13px;color:#4a4f57;line-height:1.9;display:flex;gap:8px}}
+.brief-dot{{color:#a2abb8;flex-shrink:0}}
 
 /* 单条卡片 */
 .item{{padding:16px 6px;border-bottom:1px solid #f1f2f5}}
@@ -350,6 +375,25 @@ body{{font-family:-apple-system,"Segoe UI","Microsoft YaHei","PingFang SC",sans-
             f'</div>'
             f'<div class="item-summary">{esc(e.summary)}</div>'
             f'<div class="item-meta">{tags}{src}</div>'
+            f'</div>'
+        )
+
+    @staticmethod
+    def _brief_block_html(items: List[SecurityEvent]) -> str:
+        """简讯速览：低严重度条目以标题级一行呈现。"""
+        esc = html.escape
+        lines = "".join(
+            f'<div class="brief-item"><span class="brief-dot">•</span>{esc(e.title)}</div>'
+            for e in items
+        )
+        return (
+            f'<div class="sector-block brief-block">'
+            f'<div class="sector-head" style="background:linear-gradient(120deg,#7f8c8d,rgba(0,0,0,0))">'
+            f'<span class="sector-icon" style="background:rgba(255,255,255,.22)">📌</span>'
+            f'<span class="sector-title">简讯速览</span>'
+            f'<span class="sector-count">{len(items)}条</span>'
+            f'</div>'
+            f'<div class="brief-body">{lines}</div>'
             f'</div>'
         )
 
@@ -442,6 +486,7 @@ body{{font-family:-apple-system,"Segoe UI","Microsoft YaHei","PingFang SC",sans-
         assess_body = ParagraphStyle("assess_body", fontName=font_name, fontSize=10, leading=16, textColor=BODY)
         sector_style = ParagraphStyle("sector", fontName=font_name, fontSize=12, leading=16, textColor=WHITE)
         item_style = ParagraphStyle("item", fontName=font_name, fontSize=10, leading=15, spaceAfter=5, textColor=TITLE_DARK)
+        brief_style = ParagraphStyle("brief", fontName=font_name, fontSize=10, leading=14, textColor=BODY)
 
         def esc(s):
             return _xml_escape(s or "")
@@ -487,8 +532,9 @@ body{{font-family:-apple-system,"Segoe UI","Microsoft YaHei","PingFang SC",sans-
         story.append(assess_block)
         story.append(Spacer(1, 6 * mm))
 
-        # 分类卡片（彩色分类头 + 条目）
-        grouped = self._group_by_sector(events)
+        # 分类卡片（彩色分类头 + 条目）：严重度 >=3 详读，<=2 汇总为简讯速览
+        detailed, brief = self._split_depth(events)
+        grouped = self._group_by_sector(detailed)
         for sector, items in grouped.items():
             meta = SECTOR_META.get(sector, {"color": "#2c3e50"})
             color = colors.HexColor(meta["color"])
@@ -510,6 +556,22 @@ body{{font-family:-apple-system,"Segoe UI","Microsoft YaHei","PingFang SC",sans-
                     f'<font color="#565b64">{esc(e.summary)}</font>',
                     item_style,
                 ))
+            story.append(Spacer(1, 4 * mm))
+
+        # 简讯速览（低严重度，一行一条，不展开）
+        if brief:
+            brief_head = Table([[Paragraph(f"简讯速览（{len(brief)} 条）", sector_style)]], colWidths=[width])
+            brief_head.setStyle(TableStyle([
+                ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#7f8c8d")),
+                ("LEFTPADDING", (0, 0), (-1, -1), 12),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 12),
+                ("TOPPADDING", (0, 0), (-1, -1), 6),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
+            ]))
+            story.append(brief_head)
+            story.append(Spacer(1, 2 * mm))
+            for e in brief:
+                story.append(Paragraph(f"• {esc(e.title)}", brief_style))
             story.append(Spacer(1, 4 * mm))
 
         buf = BytesIO()

@@ -37,6 +37,7 @@ class BriefAgent:
         severity_highlight: int = 4,
         time_window_hours: int = 24,
         emergency_quota: int = 2,
+        max_per_source: int = 0,
     ) -> None:
         self.collectors = collectors
         self.classifier = classifier
@@ -52,6 +53,7 @@ class BriefAgent:
         self.severity_highlight = severity_highlight
         self.emergency_quota = emergency_quota
         self.time_window_hours = time_window_hours
+        self.max_per_source = max_per_source
 
     def fetch_events(self) -> List[SecurityEvent]:
         events: List[SecurityEvent] = []
@@ -189,15 +191,31 @@ class BriefAgent:
         selected = selected_industry + selected_emergency
 
         # 相似事件去重：同主题最多 2 条（不限制国家）
+        # 单来源配额：同一 source 名最多 max_per_source 条（0=不限制）
         selected.sort(key=lambda e: (-e.severity, e.title))
         result: List[SecurityEvent] = []
         topic_count: dict = {}  # pyright: ignore[reportMissingTypeArgument]
-        for e in selected:
+        source_count: dict = {}  # pyright: ignore[reportMissingTypeArgument]
+        max_per_source = getattr(self, "max_per_source", 0) or 0
+
+        def _allow(e: SecurityEvent) -> bool:
             topic = self._similarity_key(e)
             if topic_count.get(topic, 0) >= 2:
+                return False
+            if max_per_source and source_count.get(e.source, 0) >= max_per_source:
+                return False
+            return True
+
+        def _commit(e: SecurityEvent) -> None:
+            topic = self._similarity_key(e)
+            topic_count[topic] = topic_count.get(topic, 0) + 1
+            source_count[e.source] = source_count.get(e.source, 0) + 1
+
+        for e in selected:
+            if not _allow(e):
                 continue
             result.append(e)
-            topic_count[topic] = topic_count.get(topic, 0) + 1
+            _commit(e)
             if len(result) >= self.top_n:
                 break
 
@@ -207,12 +225,11 @@ class BriefAgent:
             for e in selected:
                 if e.uid in used:
                     continue
-                topic = self._similarity_key(e)
-                if topic_count.get(topic, 0) >= 2:
+                if not _allow(e):
                     continue
                 result.append(e)
                 used.add(e.uid)
-                topic_count[topic] = topic_count.get(topic, 0) + 1
+                _commit(e)
                 if len(result) >= self.top_n:
                     break
 

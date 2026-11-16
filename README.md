@@ -8,7 +8,7 @@
 
 - **物理安防聚焦**：自动过滤纯网络安全（cyber）、合规监管（compliance）、公共卫生（health）类，聚焦地缘冲突 / 恐怖袭击 / 骚乱罢工 / 自然灾害 / 人身与资产安全五大物理安防领域。
 - **四维标签**：每条情报自动识别「地域标签 / 企业标签（安防重点企业及产业链）/ 产品标签（视频监控、门禁、报警等）/ 事件标签（政策、技术、市场、并购、展会等）」，在简报与推送中展示。
-- **安防行业信源**：接入安防垂直媒体（SecurityWorld / Security Magazine / IFSEC / SSI / SDM / Security Today 等，覆盖美/英/澳/印/拉美）、行业协会与标准组织（SIA / ASIS / ONVIF / BSIA 等）、中文安防门户与全球展会（ISC West / GSX / IFSEC / Intersec / 安博会 CPSE 等）。
+- **安防行业信源**：直连 RSS 接入 Security Magazine / SDM / SecurityInfoWatch / SSI / Australian Security Magazine / TMA / Security Journal UK / International Security Journal / SecurityLink India / Revista Segurança Eletrônica 等（覆盖美/英/澳/印/拉美）；IFSEC、Security Today、SourceSecurity、中文门户与展会动态通过 Google 新闻 `site:` 查询和中文关键词查询兜底。
 - **多信源自动容错**：GDELT、ReliefWeb、USGS 地震、CISA 已知被利用漏洞、NVD、通用 RSS、外交部提醒。单个信源失败不影响整体。
 - **LLM 中文研判 + 自包含总结**：走任意 OpenAI 兼容接口（DeepSeek / Kimi / Qwen / 中转），**换供应商只改 `.env`，代码零改动**；未配 key 或调用失败时自动回退规则模板生成自包含总结，系统永不因 LLM 停摆。
 - **三渠道推送**：企业微信 / 钉钉 / 飞书群机器人 + 邮件 + 本地文件存档，未配置的渠道自动跳过。
@@ -63,9 +63,13 @@ python -m app.main --schedule
 | `LLM_API_KEY` | 空 | LLM key（留空自动回退模板） |
 | `LLM_MODEL` | `deepseek-chat` | 模型名 |
 | `ENABLE_GDELT/RELIEFWEB/USGS/CISA/NVD/MFA` | `1/1/1/1/0/0` | 各信源开关 |
-| `RSS_FEEDS` | 15 个默认源 | `URL\|领域`，逗号分隔，可自行增删（含安防行业信源） |
+| `RSS_FEEDS` | 30 个默认源 | `URL\|领域`，逗号分隔，可自行增删（含安防行业信源） |
+| `HTML_SITES` | `21csp,afzhan,asmag` | 中文安防门户 HTML 直采（无 RSS 的服务端渲染站点，见 [app/collectors/html.py](app/collectors/html.py)） |
+| `HTML_LIMIT` | `10` | 每个 HTML 站点最多抓取的文章数 |
 | `TOP_N` | `8` | 每日最终上报条数（5-15 条，行业事件优先 + 突发事件限量） |
+| `MAX_PER_SOURCE` | `6` | 单来源配额（同一 source 名最多入选条数，0=不限制，避免聚合源霸屏） |
 | `DEDUP_DAYS` | `7` | 去重窗口（天） |
+| `TIME_WINDOW_HOURS` | `72` | 新闻时间窗（小时），72h 覆盖周末，避免周一漏掉周五行业新闻 |
 | `SEVERITY_HIGHLIGHT` | `4` | 「重点关注」阈值 |
 | `WECOM_WEBHOOK` | 空 | 企业微信机器人完整地址 |
 | `DINGTALK_WEBHOOK` / `DINGTALK_SECRET` | 空 | 钉钉机器人地址 / 加签密钥 |
@@ -104,9 +108,22 @@ python -m app.main --schedule
 
    - 最简单的方式：直接往 `.env` 的 `RSS_FEEDS` 里加一条 `URL|领域`，零代码接入新 RSS 信源。
 
+### 已验证信源与限制
+
+| 类型 | 信源 | 接入方式 | 备注 |
+| --- | --- | --- | --- |
+| 国际垂直媒体 | Security Magazine / SDM / SecurityInfoWatch / SSI / Australian Security Magazine / TMA / Security Journal UK / International Security Journal / SecurityLink India / Revista Segurança Eletrônica(巴西) / Security.World / send2press | 直连 RSS | 已验证可稳定抓取当周内容 |
+| 被反爬的垂直媒体 | IFSEC 主站 / Security Today / SourceSecurity | Google 新闻 `site:` / 关键词查询兜底 | 直连 403 或已停更；Google 收录也不稳定 |
+| 行业协会与标准组织 | SIA / ASIS / BSIA / ONVIF / PSA | Google 新闻关键词查询兜底 | 官网 RSS 被 Cloudflare 挡或已停更（ONVIF 新闻停在 2018、PSA 多为 HR 稿），无直采价值 |
+| 中文安防门户（HTML 直采） | 中国安防行业网 21csp（协会要闻/论坛）、安防展览网/智慧城市网 afzhan（市场分析/时事聚焦）、安防知识网 asmag（市场资讯） | `HTML_SITES` 配置 + [html.py](app/collectors/html.py) 正则解析 | 服务端渲染、无 RSS，直采标题/正文/日期 |
+| 中文安防门户（兜底） | 中安网 CPS（已休眠）、千家网（JS 渲染不可直采） | Google 新闻中文关键词聚合 | 无可用 RSS 或需浏览器渲染，暂以 Google 新闻覆盖 |
+| 全球展会 | ISC West / GSX / IFSEC / Intersec / Expoprotection / SICUR / 安博会 CPSE / ESX / PSATEC / ASIAL | Google 新闻关键词查询 | 展会无固定新闻 RSS，建议按展期临时加关键词 |
+
+> 时间窗由 `TIME_WINDOW_HOURS` 控制（默认 72h）。周末不运行的行业媒体在周一仍能被覆盖；跨天去重由 `DEDUP_DAYS` 保证不重复上报。
+
 ## 物理安防聚焦与四维标签
 
-- **聚焦过滤**：`app/services/classifier.py` 的 `PHYSICAL_SECURITY_CATEGORIES` 定义物理安防保留领域（geopolitical / terror / unrest / disaster / personnel）；`BriefAgent.run_daily()` 会用 `Classifier.is_physical_security()` 自动过滤掉 cyber / compliance / health 类事件。如需调整聚焦范围，改这个集合即可。
+- **聚焦过滤**：`app/services/classifier.py` 的 `PHYSICAL_SECURITY_CATEGORIES` 定义物理安防保留领域（terror / disaster / personnel）；`BriefAgent.run_daily()` 会用 `Classifier.is_physical_security()` 自动过滤掉 cyber / compliance / health / geopolitical / unrest 类事件。如需调整聚焦范围，改这个集合即可。
 - **行业子类**：`app/services/sector.py` 把事件归入 9 个行业子类（物理安防/安防硬件/周界防护/AI安防/智能安防/安防峰会/行业动态/安防机器人/无人机/突发事件），简报与海报按子类分组。
 - **精准精选**：`BriefAgent._select_top()` 优先高严重度的行业事件，突发事件（地缘/恐袭/灾害等）限量补充（至多总量的 1/3、不超过 3 条），总量控制在 `TOP_N`（默认 8，可配 5-15）。
 - **相似事件去重**：同主题事件（地震/袭击/火灾/并购等，按 `_similarity_key` 判定）最多推 2 条，**不限制国家**，只减少同质事件堆叠。

@@ -17,12 +17,36 @@ load_dotenv(BASE_DIR / ".env")
 
 # 默认 RSS 信源：`URL|领域`，可自行增删
 DEFAULT_RSS_FEEDS = (
-    "http://feeds.bbci.co.uk/news/world/rss.xml|geopolitical,"
-    "https://www.aljazeera.com/xml/rss/all.xml|geopolitical,"
-    "https://www.theguardian.com/world/rss|geopolitical,"
-    "https://thehackernews.com/feeds/posts/default|cyber,"
-    "https://krebsonsecurity.com/feed/|cyber,"
-    "https://www.bleepingcomputer.com/feed/|cyber"
+    "http://feeds.bbci.co.uk/news/world/rss.xml|geopolitical",
+    "https://www.aljazeera.com/xml/rss/all.xml|geopolitical",
+    "https://www.theguardian.com/world/rss|geopolitical",
+    "https://securityjournaluk.com/feed/|personnel",
+    "https://internationalsecurityjournal.com/feed/|personnel",
+    "https://securitylinkindia.com/feed/|personnel",
+    "https://revistasegurancaeletronica.com.br/feed/|personnel",
+    "https://www.send2press.com/wire/technology-news/security-tech-news/feed/|personnel",
+    "https://security.world/feed/|personnel",
+    "https://www.securitymagazine.com/rss/articles|personnel",
+    "https://www.sdmmag.com/rss/articles|personnel",
+    "https://www.securityinfowatch.com/__rss/website-scheduled-content.xml?input=%7B%22sectionAlias%22%3A%22home%22%7D|personnel",
+    "https://www.securitysales.com/feed/atom/|personnel",
+    "https://australiansecuritymagazine.com.au/feed/|personnel",
+    "https://tma.us/feed/|personnel",
+    "https://news.google.com/rss/search?q=%22physical+security%22&hl=en-US&gl=US&ceid=US:en|personnel",
+    "https://news.google.com/rss/search?q=%22access+control%22+security&hl=en-US&gl=US&ceid=US:en|personnel",
+    "https://news.google.com/rss/search?q=%22video+surveillance%22&hl=en-US&gl=US&ceid=US:en|personnel",
+    "https://news.google.com/rss/search?q=%22security+camera%22&hl=en-US&gl=US&ceid=US:en|personnel",
+    "https://news.google.com/rss/search?q=%22perimeter+security%22&hl=en-US&gl=US&ceid=US:en|personnel",
+    "https://news.google.com/rss/search?q=site%3Asourcesecurity.com&hl=en-US&gl=US&ceid=US:en|personnel",
+    "https://news.google.com/rss/search?q=%E5%AE%89%E9%98%B2&hl=zh-CN&gl=CN&ceid=CN:zh-Hans|personnel",
+    "https://news.google.com/rss/search?q=%E6%B5%B7%E5%BA%B7%E5%A8%81%E8%A7%86&hl=zh-CN&gl=CN&ceid=CN:zh-Hans|personnel",
+    "https://news.google.com/rss/search?q=%E5%A4%A7%E5%8D%8E%E8%82%A1%E4%BB%BD&hl=zh-CN&gl=CN&ceid=CN:zh-Hans|personnel",
+    "https://news.google.com/rss/search?q=%E5%AE%87%E8%A7%86&hl=zh-CN&gl=CN&ceid=CN:zh-Hans|personnel",
+    "https://news.google.com/rss/search?q=%E5%AE%89%E9%98%B2+OR+%E8%A7%86%E9%A2%91%E7%9B%91%E6%8E%A7+OR+%E9%97%A8%E7%A6%81+OR+%E4%BA%BA%E8%84%B8%E8%AF%86%E5%88%AB&hl=zh-CN&gl=CN&ceid=CN:zh-Hans|personnel",
+    "https://news.google.com/rss/search?q=%E5%AE%89%E9%98%B2&hl=zh-TW&gl=TW&ceid=TW:zh-Hant|personnel",
+    "https://news.google.com/rss/search?q=%28%E5%A4%A9%E5%9C%B0%E4%BC%9F%E4%B8%9A%20OR%20%E7%86%B5%E5%9F%BA%E7%A7%91%E6%8A%80%20OR%20%E6%97%B7%E8%A7%86%E7%A7%91%E6%8A%80%20OR%20%E5%95%86%E6%B1%A4%E7%A7%91%E6%8A%80%20OR%20%E4%BD%B3%E9%83%BD%E7%A7%91%E6%8A%80%20OR%20%E6%8D%B7%E9%A1%BA%E7%A7%91%E6%8A%80%29%20when%3A7d&hl=zh-CN&gl=CN&ceid=CN:zh-Hans|personnel",
+    "https://news.google.com/rss/search?q=%28%E5%AE%89%E9%98%B2%20OR%20%E8%A7%86%E9%A2%91%E7%9B%91%E6%8E%A7%29%20%28%E4%B8%9C%E5%8D%97%E4%BA%9A%20OR%20%E4%B8%AD%E4%B8%9C%20OR%20%E5%8D%B0%E5%BA%A6%20OR%20%E6%8B%89%E7%BE%8E%29%20when%3A7d&hl=zh-CN&gl=CN&ceid=CN:zh-Hans|personnel",
+    "https://news.google.com/rss/search?q=%28%E5%AE%89%E5%8D%9A%E4%BC%9A%20OR%20%E5%AE%89%E9%98%B2%E5%B1%95%20OR%20%E5%AE%89%E9%98%B2%E5%B3%B0%E4%BC%9A%29%20when%3A7d&hl=zh-CN&gl=CN&ceid=CN:zh-Hans|personnel",
 )
 
 
@@ -141,11 +165,23 @@ class Config:
         # MFA 外交部提醒（可选，需自行提供 RSS）
         self.mfa_feed = _get_str("MFA_FEED", "")
 
+        # HTML 采集（中文安防门户，无 RSS，服务端渲染；见 app/collectors/html.py）
+        # 21csp=中国安防行业网（协会） afzhan=安防展览网/智慧城市网 asmag=安防知识网
+        self.html_sites = _get_list("HTML_SITES", "21csp,afzhan,asmag")
+        self.html_limit = _get_int("HTML_LIMIT", 10)
+
         # ---- 处理 ----
         self.top_n = _get_int("TOP_N", 8)
         self.emergency_quota = _get_int("EMERGENCY_QUOTA", 2)
         self.dedup_days = _get_int("DEDUP_DAYS", 7)
         self.severity_highlight = _get_int("SEVERITY_HIGHLIGHT", 4)
+        # 单来源配额：同一 source 名最多入选 N 条，避免 Google 新闻等聚合源霸屏。
+        # 0 = 不限制。默认 6 以保留多源多样性。
+        self.max_per_source = _get_int("MAX_PER_SOURCE", 6)
+        # 时间窗：只保留最近 N 小时内的新闻。默认 72h 以覆盖周末——
+        # 工作日 08:30 运行时，24h 窗口会漏掉上周五发布的行业新闻。
+        # 跨天去重仍按 DEDUP_DAYS 生效，不会重复上报。
+        self.time_window_hours = _get_int("TIME_WINDOW_HOURS", 72)
 
         # 采集过滤关键词（正向保留物理安防 / 负向排除网络安全噪音）
         self.filter_positive = _get_list(
