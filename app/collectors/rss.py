@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import re
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import List
 from urllib.parse import urlparse
 
@@ -40,21 +40,27 @@ class RSSCollector(BaseCollector):
         self.limit = limit
         self.user_agent = user_agent
         self.timeout = timeout
-        host = urlparse(feed_url).netloc.replace("www.", "") or "feed"
+        host = (urlparse(feed_url).hostname or "feed").removeprefix("www.")
         self.name = f"rss:{host}"
 
     def collect(self) -> List[SecurityEvent]:
+        if urlparse(self.feed_url).scheme.lower() != "https":
+            logger.warning("RSS 跳过非 HTTPS 信源：%s", self.name)
+            return []
         headers = {"User-Agent": self.user_agent} if self.user_agent else {}
         try:
             resp = requests.get(self.feed_url, timeout=self.timeout, headers=headers)
             resp.raise_for_status()
+            if any(urlparse(item.url).scheme.lower() != "https" for item in (*resp.history, resp)):
+                logger.warning("RSS 跳过经非 HTTPS 重定向的信源：%s", self.name)
+                return []
             content = resp.content
         except Exception as exc:
-            logger.warning("RSS 抓取失败 %s：%s", self.feed_url, exc)
+            logger.warning("RSS 抓取失败 %s：%s", self.name, type(exc).__name__)
             return []
         feed = feedparser.parse(content)
         if feed.get("bozo") and not feed.entries:
-            logger.warning("RSS 解析异常 %s：%s", self.feed_url, feed.get("bozo_exception"))
+            logger.warning("RSS 解析异常 %s：%s", self.name, feed.get("bozo_exception"))
         events: List[SecurityEvent] = []
         for entry in feed.entries[: self.limit]:
             title = (entry.get("title") or "").strip()
@@ -73,7 +79,7 @@ class RSSCollector(BaseCollector):
                 parsed = entry.get(key)
                 if parsed:
                     try:
-                        published = datetime(*parsed[:6])
+                        published = datetime(*parsed[:6], tzinfo=timezone.utc)
                     except (TypeError, ValueError):
                         published = None
                     break

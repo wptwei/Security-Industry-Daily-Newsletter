@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import List
 
 import requests
@@ -21,7 +21,7 @@ def _parse_seendate(raw: str):
     if not raw:
         return None
     try:
-        return datetime.strptime(raw, "%Y%m%dT%H%M%SZ")
+        return datetime.strptime(raw, "%Y%m%dT%H%M%SZ").replace(tzinfo=timezone.utc)
     except ValueError:
         return None
 

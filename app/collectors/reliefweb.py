@@ -1,6 +1,8 @@
 """ReliefWeb 采集器：灾害/人道主义报告。"""
 from __future__ import annotations
 
+import html
+import re
 from datetime import datetime
 from typing import List
 
@@ -30,6 +32,7 @@ class ReliefWebCollector(BaseCollector):
             ("sort[]", "date:desc"),
             ("query[value]", "disaster OR epidemic OR conflict OR flood OR earthquake"),
             ("fields[include][]", "title"),
+            ("fields[include][]", "body"),
             ("fields[include][]", "url"),
             ("fields[include][]", "country"),
             ("fields[include][]", "primary_country"),
@@ -53,13 +56,16 @@ class ReliefWebCollector(BaseCollector):
             countries = [c.get("name", "") for c in fields.get("country") or [] if c.get("name")]
             date_obj = fields.get("date") or {}
             date_raw = date_obj.get("original") or date_obj.get("created") or ""
+            body = fields.get("body") or ""
+            body = html.unescape(re.sub(r"<[^>]+>", " ", body[:6000]))
+            body = re.sub(r"\s+", " ", body).strip()
             events.append(
                 SecurityEvent(
                     title=title,
                     source=self.name,
                     url=fields.get("url") or "",
                     country=", ".join(countries[:3]),
-                    raw=title,
+                    raw=f"{title}. {body}" if body else title,
                     event_id=str(item.get("id") or ""),
                     published_at=self._parse_date(date_raw),
                 )

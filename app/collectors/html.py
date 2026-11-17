@@ -9,8 +9,9 @@ from __future__ import annotations
 
 import html as _html
 import re
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from typing import Callable, Dict, List, Optional
+from urllib.parse import urlparse
 
 import requests
 
@@ -19,6 +20,7 @@ from app.models.event import SecurityEvent
 from app.utils.logging import get_logger
 
 logger = get_logger("html")
+BEIJING_TZ = timezone(timedelta(hours=8))
 
 _DEFAULT_UA = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
@@ -96,7 +98,7 @@ def _extract_date(html_text: str, url: str) -> Optional[datetime]:
     m = re.search(r"(20\d{2})[-/年](\d{1,2})[-/月](\d{1,2})日?\s*(\d{1,2}):(\d{2})", head)
     if m:
         try:
-            return datetime(int(m.group(1)), int(m.group(2)), int(m.group(3)), int(m.group(4)), int(m.group(5)))
+            return datetime(int(m.group(1)), int(m.group(2)), int(m.group(3)), int(m.group(4)), int(m.group(5)), tzinfo=BEIJING_TZ)
         except ValueError:
             pass
     # 回退：仅日期
@@ -105,16 +107,10 @@ def _extract_date(html_text: str, url: str) -> Optional[datetime]:
         m = _DATE_RE.search(head)
     if m:
         try:
-            return datetime(int(m.group(1)), int(m.group(2)), int(m.group(3)))
+            return datetime(int(m.group(1)), int(m.group(2)), int(m.group(3)), tzinfo=BEIJING_TZ)
         except ValueError:
             pass
-    # 回退：从 URL 的 /YYYYMM/ 取月份
-    mu = re.search(r"/(20\d{2})(\d{2})/", url)
-    if mu:
-        try:
-            return datetime(int(mu.group(1)), int(mu.group(2)), 1)
-        except ValueError:
-            pass
+    # URL 里的年月不是发布日期，不据此猜测文章时效。
     return None
 
 
@@ -124,8 +120,8 @@ _SITE_PARSERS: Dict[str, dict] = {
     "21csp": {
         "name": "html:21csp",
         "category": "personnel",
-        "list_urls": ["http://xh.21csp.com.cn/C58/index.html"],
-        "link_re": re.compile(r'href=["\'](http://xh\.21csp\.com\.cn/c5[89]/\d{6}/\d+\.html)["\']', re.I),
+        "list_urls": ["https://xh.21csp.com.cn/C58/index.html"],
+        "link_re": re.compile(r'href=["\'](https://xh\.21csp\.com\.cn/c5[89]/\d{6}/\d+\.html)["\']', re.I),
         "body_class": "NewsContent",
     },
     "afzhan": {
@@ -151,9 +147,15 @@ _SITE_PARSERS: Dict[str, dict] = {
 
 def _fetch(url: str, timeout: int) -> Optional[str]:
     """GET 并按 apparent_encoding 解码，失败返回 None。"""
+    if urlparse(url).scheme.lower() != "https":
+        logger.warning("HTML 跳过非 HTTPS 地址")
+        return None
     try:
         resp = requests.get(url, timeout=timeout, headers={"User-Agent": _DEFAULT_UA})
         resp.raise_for_status()
+        if any(urlparse(item.url).scheme.lower() != "https" for item in (*resp.history, resp)):
+            logger.warning("HTML 跳过经非 HTTPS 重定向的地址")
+            return None
         if not resp.text:
             return None
         resp.encoding = resp.apparent_encoding

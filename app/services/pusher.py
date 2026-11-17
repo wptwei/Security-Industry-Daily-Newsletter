@@ -6,6 +6,7 @@ import hashlib
 import hmac
 import time
 import urllib.parse
+from datetime import datetime
 from typing import Dict
 
 import requests
@@ -13,6 +14,13 @@ import requests
 from app.utils.logging import get_logger
 
 logger = get_logger("pusher")
+
+
+def _subject(date_str: str) -> str:
+    """邮件主题：Global Security Newsletter - 日期 星期几。"""
+    weekdays = ["星期一", "星期二", "星期三", "星期四", "星期五", "星期六", "星期日"]
+    d = datetime.strptime(date_str, "%Y-%m-%d")
+    return f"Global Security Newsletter - {date_str} {weekdays[d.weekday()]}"
 
 WECOM_LIMIT = 4096      # 企业微信 markdown 字节上限
 DINGTALK_LIMIT = 20000  # 钉钉 markdown 字符上限
@@ -50,9 +58,19 @@ class Pusher:
         try:
             resp = requests.post(url, json=payload, timeout=timeout)
             resp.raise_for_status()
+            # Robot webhooks can report a delivery error with HTTP 200.
+            result = resp.json()
+            if not isinstance(result, dict):
+                logger.error("推送失败：响应格式异常")
+                return False
+            code = result.get("errcode", result.get("code"))
+            if code not in (0, "0"):
+                logger.error("推送失败：接口返回业务错误")
+                return False
             return True
         except Exception as exc:
-            logger.error("推送失败 %s：%s", url[:60], exc)
+            # URLs and request exceptions can contain the webhook token.
+            logger.error("推送失败：%s", type(exc).__name__)
             return False
 
     def _push_wecom(self, text: str) -> str:
@@ -134,19 +152,29 @@ class Pusher:
             related = alt
 
         msg = MIMEMultipart("mixed")
-        msg["Subject"] = f"全球安防态势日报 · {date_str}"
+        msg["Subject"] = _subject(date_str)
         msg["From"] = cfg.smtp_from or cfg.smtp_user
         msg["To"] = ", ".join(cfg.email_to) if cfg.email_to else ""
+        if cfg.email_cc:
+            msg["Cc"] = cfg.email_cc
         msg.attach(related)
 
         if pdf_path is not None and pdf_path.exists():
             pdf_bytes = pdf_path.read_bytes()
-            filename = f"daily_brief_{date_str}.pdf"
+            filename = f"security_daily_report_{date_str}.pdf"
             part = MIMEApplication(pdf_bytes, _subtype="pdf", Name=filename)
             part.add_header("Content-Disposition", "attachment", filename=filename)
             msg.attach(part)
 
         return msg
+
+    def _all_recipients(self) -> list:
+        """所有收件人（To + Cc 的邮箱地址），用于 SMTP 信封。"""
+        import re
+        to = list(self.config.email_to)
+        cc = self.config.email_cc or ""
+        cc_addrs = re.findall(r"<([^>]+)>", cc) or [a.strip() for a in cc.split(",") if a.strip()]
+        return to + [a for a in cc_addrs if a not in to]
 
     def _send_email(self, markdown_text: str, html_text: str, date_str: str, pdf_path=None, poster_png=None) -> str:
         cfg = self.config
@@ -156,18 +184,22 @@ class Pusher:
             import smtplib
             msg = self._build_message(markdown_text, html_text, date_str, pdf_path, poster_png)
 
-            if cfg.smtp_port == 465:
-                server = smtplib.SMTP_SSL(cfg.smtp_host, cfg.smtp_port, timeout=20)
-            elif cfg.smtp_port == 587:
-                server = smtplib.SMTP(cfg.smtp_host, cfg.smtp_port, timeout=20)
-                server.starttls()
-            else:
-                # 内网/网关明文 SMTP（如端口 25，无 STARTTLS）
-                server = smtplib.SMTP(cfg.smtp_host, cfg.smtp_port, timeout=20)
-            if cfg.smtp_user:
-                server.login(cfg.smtp_user, cfg.smtp_pass)
-            server.sendmail(msg["From"], cfg.email_to, msg.as_string())
-            server.quit()
+            connection = (
+                smtplib.SMTP_SSL(cfg.smtp_host, cfg.smtp_port, timeout=20)
+                if cfg.smtp_port == 465
+                else smtplib.SMTP(cfg.smtp_host, cfg.smtp_port, timeout=20)
+            )
+            with connection as server:
+                if cfg.smtp_port != 465:
+                    server.ehlo()
+                    if server.has_extn("starttls"):
+                        server.starttls()
+                        server.ehlo()
+                    elif cfg.smtp_user:
+                        raise smtplib.SMTPNotSupportedError("服务器不支持 STARTTLS，已拒绝明文认证")
+                if cfg.smtp_user:
+                    server.login(cfg.smtp_user, cfg.smtp_pass)
+                server.sendmail(msg["From"], self._all_recipients(), msg.as_string())
             return "成功"
         except Exception as exc:
             logger.error("邮件发送失败：%s", exc)
@@ -180,7 +212,7 @@ class Pusher:
             msg = self._build_message(markdown_text, html_text, date_str, pdf_path, poster_png)
             out_dir = Path(output_dir) if output_dir else Path(self.config.output_dir)
             out_dir.mkdir(parents=True, exist_ok=True)
-            eml_path = out_dir / f"daily_brief_{date_str}.eml"
+            eml_path = out_dir / f"security_daily_report_{date_str}.eml"
             eml_path.write_bytes(msg.as_bytes())
             logger.info("邮件草稿 .eml 已写入 %s", eml_path)
             return str(eml_path)
@@ -206,7 +238,9 @@ class Pusher:
             outlook = win32com.client.Dispatch("Outlook.Application")
             mail = outlook.CreateItem(0)  # 0 = olMailItem
             mail.To = "; ".join(cfg.email_to)
-            mail.Subject = f"全球安防态势日报 · {date_str}"
+            if cfg.email_cc:
+                mail.CC = cfg.email_cc.replace(",", "; ")
+            mail.Subject = _subject(date_str)
 
             if poster_png:
                 # 海报长图作为内嵌图片（cid:poster）——Outlook COM 需要绝对路径

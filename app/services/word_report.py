@@ -105,7 +105,7 @@ def build_workflow_doc() -> Document:
         ("④ 四维打标", "规则关键词识别「地域 / 企业 / 产品 / 事件」四维标签。"),
         ("⑤ 行业子类", "归入 9 大行业子类（物理安防/安防硬件/周界防护/AI安防/智能安防/峰会/动态/机器人无人机/突发事件）。"),
         ("⑥ 精准精选", "行业事件优先 + 突发事件限量（≤1/3）+ 相似事件去重（同主题 ≤2 条）+ USGS 每国家 1 条。"),
-        ("⑦ 提炼摘要", "LLM 三层提炼（事实+机理+洞察）+ 规则模板兜底；编号错位自动按序回填。"),
+        ("⑦ 提炼摘要", "LLM 分批提炼 + 规则模板兜底；编号错乱时回退，避免摘要错配。"),
         ("⑧ 海报呈现与推送", "HTML/CSS + Edge 无头打印成海报风 PDF，邮件/企微/钉钉/飞书多渠道推送。"),
     ]
     for t, d in steps:
@@ -121,7 +121,7 @@ def build_workflow_doc() -> Document:
         ("USGS 源头降采样", "按 country 分组取最强，每国家/地区最多 1 条。"),
         ("海报渲染算法", "HTML/CSS + 浏览器无头打印，reportlab 兜底。"),
         ("去重调度算法", "本地 JSON + N 天窗口，跨天不重复。"),
-        ("误判纠正算法", "行业源识别避免误判突发事件；LLM 编号错位按序对齐回填。"),
+        ("误判纠正算法", "行业源识别避免误判突发事件；LLM 编号不完整时回退模板。"),
     ]
     for name, desc in algos:
         _add_body(doc, f"· {name}：{desc}", indent=True)
@@ -148,7 +148,7 @@ def build_workflow_doc() -> Document:
         "精准而非堆量：每日 5-15 条，相似事件去重，杜绝无效信息刷屏。",
         "提炼而非摘录：LLM 三层提炼，点明「对行业而言/反映出/这意味着」的洞察结论。",
         "自包含可读：收件人不点链接、不翻墙也能看懂每条情报要点。",
-        "容错优先：LLM 不可用回退模板、单源失败静默跳过、编号错位自动纠正，系统永不因单点故障停摆。",
+        "容错优先：LLM 不可用或编号错乱时回退模板，单源失败不影响其他信源。",
         "即插即用：新增信源改 .env 一行配置，换 LLM 供应商零代码改动。",
     ]
     for p in points:
@@ -156,10 +156,10 @@ def build_workflow_doc() -> Document:
 
     _add_heading(doc, "六、产出物")
     outputs = [
-        "daily_brief_YYYY-MM-DD.md —— Markdown 简报",
-        "daily_brief_YYYY-MM-DD.html —— 邮件正文（海报同款样式）",
-        "daily_brief_YYYY-MM-DD.pdf —— 海报卡片风 PDF",
-        "daily_brief_YYYY-MM-DD.json —— 结构化归档",
+        "security_daily_report_YYYY-MM-DD.md —— Markdown 简报",
+        "security_daily_report_YYYY-MM-DD.html —— 邮件正文（海报同款样式）",
+        "security_daily_report_YYYY-MM-DD.pdf —— 海报卡片风 PDF",
+        "security_daily_report_YYYY-MM-DD.json —— 结构化归档",
         "history.json —— 跨天去重历史",
     ]
     for o in outputs:
@@ -235,7 +235,7 @@ def build_compare_doc() -> Document:
         "自动化程度更高：8 步全流水线自动执行，无人值守定时推送。",
         "聚焦更精准：自动过滤非物理安防类噪声，专注部门主线 5 大方向。",
         "去重更智能：跨天去重 + 相似主题 ≤2 + USGS 源头降采样三层防护。",
-        "容错更稳健：LLM 不可用回退模板、编号错位自动纠正、单源失败静默跳过。",
+        "容错更稳健：LLM 不可用或编号错乱时回退模板，单源失败不影响其他信源。",
         "分发更安全：移除所有外链，纯文本来源展示，发给外部无「链接打不开」问题。",
         "扩展更便捷：新增信源改 .env 一行配置，换 LLM 供应商零代码改动。",
         "呈现更丰富：海报 PDF + 邮件 HTML + Markdown + JSON 四格式同源。",

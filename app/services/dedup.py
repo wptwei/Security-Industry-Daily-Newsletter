@@ -2,9 +2,13 @@
 from __future__ import annotations
 
 import json
+import hashlib
+import re
+import unicodedata
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Dict, List
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from app.models.event import SecurityEvent
 from app.utils.logging import get_logger
@@ -48,8 +52,47 @@ class DedupStore:
             return False
         return (_today() - last_date).days < self.days
 
+    @staticmethod
+    def _keys(event: SecurityEvent) -> set[str]:
+        """Combine source ID with normalized article URL and sufficiently specific title."""
+        keys = {event.uid}
+        if event.url:
+            try:
+                parsed = urlsplit(event.url)
+            except ValueError:
+                parsed = None
+            if parsed is not None and parsed.scheme.lower() in ("http", "https") and parsed.hostname:
+                query = urlencode(sorted(
+                    (k, v) for k, v in parse_qsl(parsed.query, keep_blank_values=True)
+                    if not k.lower().startswith("utm_") and k.lower() not in ("fbclid", "gclid")
+                ))
+                canonical = urlunsplit(("https", parsed.netloc.lower(), parsed.path.rstrip("/") or "/", query, ""))
+                keys.add("url:" + hashlib.sha256(canonical.encode("utf-8")).hexdigest())
+        title = unicodedata.normalize("NFKC", event.original_title).casefold()
+        has_cjk = bool(re.search(r"[\u3400-\u9fff]", title))
+        title = re.sub(r"[^\w]+", "", title)
+        if len(title) >= (12 if has_cjk else 30):
+            keys.add("title:" + hashlib.sha256(title.encode("utf-8")).hexdigest())
+        return keys
+
     def filter(self, events: List[SecurityEvent]) -> List[SecurityEvent]:
-        fresh = [e for e in events if not self.is_recent(e.uid)]
+        fresh: List[SecurityEvent] = []
+        batch_keys: Dict[str, int] = {}
+        for event in events:
+            keys = self._keys(event)
+            if any(self.is_recent(key) for key in keys):
+                continue
+            duplicate_at = next((batch_keys[key] for key in keys if key in batch_keys), None)
+            if duplicate_at is not None:
+                if len(event.raw) > len(fresh[duplicate_at].raw):
+                    fresh[duplicate_at] = event
+                for key in keys:
+                    batch_keys[key] = duplicate_at
+                continue
+            position = len(fresh)
+            fresh.append(event)
+            for key in keys:
+                batch_keys[key] = position
         skipped = len(events) - len(fresh)
         if skipped:
             logger.info("去重：跳过 %d 条近期已出现的事件", skipped)
@@ -58,7 +101,8 @@ class DedupStore:
     def mark_seen(self, events: List[SecurityEvent]) -> None:
         today = _today().isoformat()
         for event in events:
-            self._seen[event.uid] = today
+            for key in self._keys(event):
+                self._seen[key] = today
         self._prune()
 
     def _prune(self) -> None:

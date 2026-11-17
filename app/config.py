@@ -17,7 +17,7 @@ load_dotenv(BASE_DIR / ".env")
 
 # 默认 RSS 信源：`URL|领域`，可自行增删
 DEFAULT_RSS_FEEDS = (
-    "http://feeds.bbci.co.uk/news/world/rss.xml|geopolitical",
+    "https://feeds.bbci.co.uk/news/world/rss.xml|geopolitical",
     "https://www.aljazeera.com/xml/rss/all.xml|geopolitical",
     "https://www.theguardian.com/world/rss|geopolitical",
     "https://securityjournaluk.com/feed/|personnel",
@@ -202,12 +202,14 @@ class Config:
         self.dingtalk_webhook = _get_str("DINGTALK_WEBHOOK", "")
         self.dingtalk_secret = _get_str("DINGTALK_SECRET", "")
         self.feishu_webhook = _get_str("FEISHU_WEBHOOK", "")
+        self.serverchan_key = _get_str("SERVERCHAN_KEY", "")  # Server酱 个人微信推送
         self.smtp_host = _get_str("SMTP_HOST", "")
         self.smtp_port = _get_int("SMTP_PORT", 465)
         self.smtp_user = _get_str("SMTP_USER", "")
         self.smtp_pass = _get_str("SMTP_PASS", "")
         self.smtp_from = _get_str("SMTP_FROM", "")  # 默认取 SMTP_USER
         self.email_to = _get_list("EMAIL_TO", "")
+        self.email_cc = _get_str("EMAIL_CC", "")  # 抄送（可含「姓名 <邮箱>」格式，逗号分隔）
 
         # ---- 网络代理（可选）----
         # 国内 IP 访问境外源（BBC/Guardian/Al Jazeera 等）时可配代理；邮件（SMTP）

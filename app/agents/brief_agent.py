@@ -71,7 +71,7 @@ class BriefAgent:
     def _filter_recent(self, events: List[SecurityEvent]) -> List[SecurityEvent]:
         """时间窗口过滤：只保留报告生成前 time_window_hours 小时内的新闻。
 
-        无 published_at 的事件视为无法判断时间，保守保留。
+        无发布日期的事件无法证明仍在时间窗口内，跳过。
         """
         now = datetime.now(timezone.utc)
         cutoff = timedelta(hours=self.time_window_hours)
@@ -80,17 +80,18 @@ class BriefAgent:
         for e in events:
             pt = e.published_at
             if pt is None:
-                kept.append(e)
+                removed += 1
                 continue
-            # 统一转成 naive UTC 比较（避免 aware/naive 混用报错）
-            if pt.tzinfo is not None:
-                pt = pt.astimezone(timezone.utc).replace(tzinfo=None)
-            if (now.replace(tzinfo=None) - pt) > cutoff:
+            # 旧采集器若仍返回 naive 时间，按 UTC 解释。
+            if pt.tzinfo is None:
+                pt = pt.replace(tzinfo=timezone.utc)
+            age = now - pt.astimezone(timezone.utc)
+            if age > cutoff or age < -timedelta(hours=6):
                 removed += 1
                 continue
             kept.append(e)
         if removed:
-            logger.info("时间窗口过滤：剔除 %d 条超过 %d 小时的旧闻",
+            logger.info("时间窗口过滤：剔除 %d 条过期、无日期或时间异常的新闻（窗口 %d 小时）",
                         removed, self.time_window_hours)
         return kept
 
@@ -121,7 +122,17 @@ class BriefAgent:
             return []
 
         events = self.summarizer.summarize_events(events)
+        # LLM may reintroduce content rejected by the earlier source filter.
+        events, generated_removed = self.sensitive_filter.filter(events)
+        if generated_removed:
+            logger.warning("生成后内容过滤：剔除 %d 条事件", generated_removed)
+        if not events:
+            logger.warning("生成后无可上报事件，跳过报告与推送")
+            return []
         assess = self.summarizer.assess(events)
+        if self.sensitive_filter.is_sensitive(SecurityEvent(title=assess, source="assessment")):
+            logger.warning("生成后态势研判未通过内容过滤，使用规则模板")
+            assess = self.summarizer._template_assess(events)
 
         markdown_text = self.report.render_markdown(events, assess)
         paths = self.report.write_files(events, assess, markdown_text=markdown_text)
@@ -131,11 +142,14 @@ class BriefAgent:
         # 无论 SMTP 是否可用，都生成 .eml 草稿文件 + 写入 Outlook 草稿箱（可编辑），便于手动发送
         self.pusher.save_eml(markdown_text, email_html, paths["date"], pdf_path=paths.get("pdf"), poster_png=poster_png)
         self.pusher.save_outlook_draft(email_html, paths["date"], pdf_path=paths.get("pdf"), poster_png=poster_png)
-        _ = self.pusher.push(markdown_text, email_html, paths["date"], pdf_path=paths.get("pdf"), poster_png=poster_png)  # pyright: ignore[reportArgumentType]
-
-        self.dedup.mark_seen(events)
-        self.dedup.save()
-        logger.info("今日安防情报任务完成，共上报 %d 条", len(events))
+        push_results = self.pusher.push(markdown_text, email_html, paths["date"], pdf_path=paths.get("pdf"), poster_png=poster_png)  # pyright: ignore[reportArgumentType]
+        active_results = [status for status in push_results.values() if not status.startswith("跳过")]
+        if active_results and all(status == "成功" for status in active_results):
+            self.dedup.mark_seen(events)
+            self.dedup.save()
+        else:
+            logger.warning("推送未全部成功，保留事件供下次重试")
+        logger.info("今日安防情报任务完成，共生成 %d 条", len(events))
         return events
 
     # 相似事件主题词 -> 归为一类，每类最多推 2 条

@@ -68,8 +68,11 @@ class SecurityEvent:
     event_id: str = ""           # 源内唯一 ID（去重用）
     tags: dict = None            # 四维标签 {region:[], company:[], product:[], event:[]}  # pyright: ignore[reportAssignmentType, reportMissingTypeArgument]
     sector: str = "physical"     # 行业子类（物理安防/安防硬件/周界防护/AI安防/智能安防/峰会/行业动态/机器人无人机/突发事件）
+    original_title: str = ""       # 采集时的标题，LLM 改写后仍用于去重与核查
 
     def __post_init__(self) -> None:
+        if not self.original_title:
+            self.original_title = self.title
         if not self.raw:
             self.raw = self.title
         if not self.summary:

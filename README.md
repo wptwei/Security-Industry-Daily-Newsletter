@@ -47,9 +47,9 @@ python -m app.main --schedule
 
 运行后在 `output/` 生成：
 
-- `daily_brief_YYYY-MM-DD.md` —— Markdown 简报（推送正文用）
-- `daily_brief_YYYY-MM-DD.html` —— HTML 版（邮件/存档）
-- `daily_brief_YYYY-MM-DD.json` —— 结构化归档
+- `security_daily_report_YYYY-MM-DD.md` —— Markdown 简报（推送正文用）
+- `security_daily_report_YYYY-MM-DD.html` —— HTML 版（邮件/存档）
+- `security_daily_report_YYYY-MM-DD.json` —— 结构化归档
 - `history.json` —— 去重历史（自动维护）
 
 ## 配置（.env）

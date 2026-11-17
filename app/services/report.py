@@ -11,6 +11,7 @@ import subprocess
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Dict, List
+from urllib.parse import quote, urlsplit
 
 from app.models.event import SecurityEvent
 from app.utils.logging import get_logger
@@ -134,6 +135,25 @@ class ReportService:
             grouped.setdefault(e.sector, []).append(e)
         return grouped
 
+    @staticmethod
+    def _source_url(event: SecurityEvent) -> str:
+        try:
+            parsed = urlsplit(event.url or "")
+        except ValueError:
+            return ""
+        if parsed.scheme.lower() not in ("http", "https") or not parsed.hostname or parsed.username:
+            return ""
+        return quote(event.url, safe=":/?&=%#@+,-._~;")
+
+    @staticmethod
+    def _published_label(event: SecurityEvent) -> str:
+        if event.published_at is None:
+            return ""
+        published = event.published_at
+        if published.tzinfo is None:
+            published = published.replace(tzinfo=timezone.utc)
+        return published.astimezone(BEIJING_TZ).strftime("%Y-%m-%d %H:%M")
+
     # ---------- Markdown ----------
     def render_markdown(self, events: List[SecurityEvent], assess: str) -> str:
         date_str = self._date_str()
@@ -167,9 +187,16 @@ class ReportService:
         # 标题（简洁中文总结）+ 摘要（详细提炼）
         title = e.title or ""
         summary = e.summary or ""
+        source = f"来源：{e.source}"
+        published = ReportService._published_label(e)
+        if published:
+            source += f" · 发布时间：{published}（北京时间）"
+        url = ReportService._source_url(e)
+        if url:
+            source += f" · [查看原文]({url})"
         if title and title != summary:
-            return f"- **[{e.severity_label}] {title}**{place} {tag}\n  {summary}".strip()
-        return f"- **[{e.severity_label}]** {summary}{place} {tag}".strip()
+            return f"- **[{e.severity_label}] {title}**{place} {tag}\n  {summary}\n  {source}".strip()
+        return f"- **[{e.severity_label}]** {summary}{place} {tag}\n  {source}".strip()
 
     @staticmethod
     def _clean_assess(assess: str) -> str:
@@ -344,7 +371,11 @@ body{{font-family:-apple-system,"Segoe UI","Microsoft YaHei","PingFang SC",sans-
         tags = ""
         for t in e.tags.get("product", [])[:3] + e.tags.get("event", [])[:2]:
             tags += f'<span class="tag">{esc(t)}</span>'
-        src = f'<span class="src">来源：{esc(e.source)}</span>'
+        published = self._published_label(e)
+        url = self._source_url(e)
+        source_text = f"来源：{e.source}" + (f" · {published}" if published else "")
+        link = f' · <a href="{esc(url, quote=True)}">原文</a>' if url else ""
+        src = f'<span class="src">{esc(source_text)}{link}</span>'
         return (
             f'<div class="item">'
             f'<div class="item-head">'
@@ -382,11 +413,16 @@ body{{font-family:-apple-system,"Segoe UI","Microsoft YaHei","PingFang SC",sans-
             for e in items:
                 sev_color = SEV_COLORS.get(e.severity, "#000000")
                 tag = f'<span style="color:#8a94a3;font-size:11px;"> {esc(e.tag_label())}</span>' if e.tag_label() else ""
+                published = self._published_label(e)
+                source_text = f"来源：{e.source}" + (f" · {published}" if published else "")
+                url = self._source_url(e)
+                source_link = f' · <a href="{esc(url, quote=True)}">查看原文</a>' if url else ""
                 rows.append(
                     f'<tr><td style="padding:10px 16px;border-bottom:1px solid #eef0f4;">'
                     f'<span style="color:{sev_color};font-weight:bold;">[{esc(e.severity_label)}]</span> '
                     f'<strong style="color:#1c1f26;font-size:13px;">{esc(e.title)}</strong>{tag}<br/>'
-                    f'<span style="color:#565b64;font-size:12px;line-height:1.7;">{esc(e.summary)}</span>'
+                    f'<span style="color:#565b64;font-size:12px;line-height:1.7;">{esc(e.summary)}</span><br/>'
+                    f'<span style="color:#8a94a3;font-size:11px;">{esc(source_text)}{source_link}</span>'
                     f'</td></tr>'
                 )
 
@@ -449,6 +485,7 @@ body{{font-family:-apple-system,"Segoe UI","Microsoft YaHei","PingFang SC",sans-
                 "--virtual-time-budget=3000",
                 "--hide-scrollbars",
                 "--window-size=780,12000",
+                "--force-device-scale-factor=2",
                 "--screenshot=" + str(tmp_png),
                 "file:///" + str(tmp_html).replace("\\", "/"),
             ]
@@ -629,9 +666,14 @@ body{{font-family:-apple-system,"Segoe UI","Microsoft YaHei","PingFang SC",sans-
             story.append(Spacer(1, 2 * mm))
             for e in items:
                 sev_color = SEV_COLORS.get(e.severity, "#000")
+                published = self._published_label(e)
+                source_text = f"来源：{e.source}" + (f" · {published}" if published else "")
+                source_url = self._source_url(e)
+                source_link = f' · <link href="{esc(source_url, quote=True)}">查看原文</link>' if source_url else ""
                 story.append(Paragraph(
                     f'<font color="{sev_color}"><b>[{esc(e.severity_label)}]</b></font> {esc(e.title)}<br/>'
-                    f'<font color="#565b64">{esc(e.summary)}</font>',
+                    f'<font color="#565b64">{esc(e.summary)}</font><br/>'
+                    f'<font color="#8a94a3">{esc(source_text)}{source_link}</font>',
                     item_style,
                 ))
             story.append(Spacer(1, 4 * mm))
@@ -653,16 +695,16 @@ body{{font-family:-apple-system,"Segoe UI","Microsoft YaHei","PingFang SC",sans-
             "assess": assess,
             "items": [e.to_dict() for e in events],
         }
-        md_path = self.output_dir / f"daily_brief_{date_str}.md"
-        html_path = self.output_dir / f"daily_brief_{date_str}.html"
-        json_path = self.output_dir / f"daily_brief_{date_str}.json"
+        md_path = self.output_dir / f"security_daily_report_{date_str}.md"
+        html_path = self.output_dir / f"security_daily_report_{date_str}.html"
+        json_path = self.output_dir / f"security_daily_report_{date_str}.json"
         md_path.write_text(markdown_text, encoding="utf-8")
         html_path.write_text(html_text, encoding="utf-8")
         json_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
 
         pdf_path = None
         try:
-            pdf_path = self.output_dir / f"daily_brief_{date_str}.pdf"
+            pdf_path = self.output_dir / f"security_daily_report_{date_str}.pdf"
             pdf_path.write_bytes(self.render_pdf(events, assess))
         except Exception as exc:
             logger.warning("PDF 生成失败：%s", exc)

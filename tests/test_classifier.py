@@ -256,17 +256,19 @@ def test_time_window_filter():
         SecurityEvent(title="recent", source="x", published_at=now - timedelta(hours=2)),
         # 48 小时前（应过滤）
         SecurityEvent(title="old", source="x", published_at=now - timedelta(hours=48)),
-        # 无时间（保守保留）
+        # 无时间（无法确认时效，应过滤）
         SecurityEvent(title="no_time", source="x", published_at=None),
         # 未来时间（时区偏差，保留）
         SecurityEvent(title="future", source="x", published_at=now + timedelta(hours=1)),
+        SecurityEvent(title="far_future", source="x", published_at=now + timedelta(days=1)),
     ]
     kept = agent._filter_recent(events)
     titles = {e.title for e in kept}
     assert "recent" in titles
     assert "old" not in titles
-    assert "no_time" in titles
+    assert "no_time" not in titles
     assert "future" in titles
+    assert "far_future" not in titles
 
 
 def test_negative_keyword_filter():
