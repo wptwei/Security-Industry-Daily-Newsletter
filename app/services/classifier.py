@@ -4,6 +4,7 @@ from __future__ import annotations
 from typing import Dict
 
 from app.models.event import CATEGORIES, SecurityEvent
+from app.services.sector import INDUSTRY_SOURCES
 
 # 每个领域一组关键词（英文 + 中文，均转小写匹配）
 CATEGORY_KEYWORDS: Dict[str, tuple] = {
@@ -60,6 +61,43 @@ AUTHORITATIVE_SOURCES = {"usgs", "cisa", "nvd", "mfa"}
 PHYSICAL_SECURITY_CATEGORIES = {
     "terror", "disaster", "personnel",
 }
+
+# 垂直媒体文章常在正文顺带讨论网络、法规和商业背景。
+# 选题以标题为准，避免正文中的旁支词语覆盖物理安防主主题。
+VERTICAL_TITLE_TERMS = (
+    "physical security", "security system", "security infrastructure", "surveillance",
+    "camera", "cctv", "video", "access control", "critical communication", "install",
+    "alarm", "screening", "monitoring", "patrol", "police", "fire detection",
+    "guard", "perimeter", "door", "biometric", "identity", "summit", "award",
+    "intrusion", "theft", "tma honors", "安防", "安保", "监控", "门禁", "安检", "报警",
+    "周界", "无人机", "警务", "摄像", "生物识别", "消防", "奖项",
+)
+VERTICAL_OFFTOPIC_TERMS = (
+    "cyber", "ransomware", "malware", "api key", "multi-factor authentication",
+    "scam", "online storefront", "data centre", "data center", "网络安全", "勒索软件",
+    "数据泄露", "黑客", "网络攻击", "诈骗", "数据中心",
+)
+VERTICAL_HARD_CYBER_TERMS = (
+    "vulnerability", "exploit", "ransomware", "malware", "breach", "phishing",
+    "cve-", "hackers", "api key", "漏洞", "恶意软件", "勒索软件", "数据泄露", "网络攻击",
+)
+VERTICAL_PHYSICAL_OVERRIDE = (
+    "police summit", "video security", "physical security", "access control",
+    "surveillance", "camera", "screening", "alarm", "perimeter",
+    "警务峰会", "视频安防", "物理安防", "门禁", "监控", "安检", "报警", "周界",
+)
+
+
+def _vertical_physical_title(event: SecurityEvent) -> bool:
+    if not any(host in event.source.lower() for host in INDUSTRY_SOURCES):
+        return False
+    title = event.original_title.lower()
+    if any(term in title for term in VERTICAL_HARD_CYBER_TERMS):
+        return False
+    if not any(term in title for term in VERTICAL_TITLE_TERMS):
+        return False
+    return (not any(term in title for term in VERTICAL_OFFTOPIC_TERMS)
+            or any(term in title for term in VERTICAL_PHYSICAL_OVERRIDE))
 
 # 物理安防相关性关键词：事件必须命中这些词才视为物理安防相关，
 # 用于过滤通用新闻源（BBC/Guardian/Al Jazeera 等）里的娱乐/体育/社会杂闻。
@@ -130,6 +168,8 @@ class Classifier:
     def classify(self, event: SecurityEvent) -> str:
         if event.source in AUTHORITATIVE_SOURCES and event.category in CATEGORIES:
             return event.category
+        if _vertical_physical_title(event):
+            return "personnel"
         text = f"{event.title} {event.raw} {event.summary}".lower()
         scores: Dict[str, int] = {}
         for cat, keywords in CATEGORY_KEYWORDS.items():
@@ -151,6 +191,8 @@ class Classifier:
            防止网络安全新闻被误判为物理安防。
         4. 内容必须命中物理安防相关性关键词，过滤娱乐/体育/社会杂闻。
         """
+        if any(host in event.source.lower() for host in INDUSTRY_SOURCES):
+            return _vertical_physical_title(event)
         if event.category not in PHYSICAL_SECURITY_CATEGORIES:
             return False
         # 权威信源（usgs/cisa/nvd/mfa）直接采信，不再做关键词过滤

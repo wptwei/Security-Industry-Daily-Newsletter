@@ -160,7 +160,7 @@ class Config:
         self.rss_feeds = _parse_rss_feeds(
             _clean(os.getenv("RSS_FEEDS", DEFAULT_RSS_FEEDS)) or DEFAULT_RSS_FEEDS
         )
-        self.rss_limit = _get_int("RSS_LIMIT", 15)
+        self.rss_limit = _get_int("RSS_LIMIT", 30)
 
         # MFA 外交部提醒（可选，需自行提供 RSS）
         self.mfa_feed = _get_str("MFA_FEED", "")
@@ -171,8 +171,8 @@ class Config:
         self.html_limit = _get_int("HTML_LIMIT", 10)
 
         # ---- 处理 ----
-        self.top_n = _get_int("TOP_N", 8)
-        self.emergency_quota = _get_int("EMERGENCY_QUOTA", 2)
+        self.top_n = _get_int("TOP_N", 15)
+        self.emergency_quota = _get_int("EMERGENCY_QUOTA", 1)
         self.dedup_days = _get_int("DEDUP_DAYS", 7)
         self.severity_highlight = _get_int("SEVERITY_HIGHLIGHT", 4)
         # 单来源配额：同一 source 名最多入选 N 条，避免 Google 新闻等聚合源霸屏。

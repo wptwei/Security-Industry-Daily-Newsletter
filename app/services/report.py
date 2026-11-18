@@ -229,8 +229,8 @@ class ReportService:
         return text.strip()
 
     # ---------- 海报 HTML ----------
-    def render_poster_html(self, events: List[SecurityEvent], assess: str) -> str:
-        """生成海报卡片风 HTML（供 PDF 转换与邮件展示）。"""
+    def render_poster_html(self, events: List[SecurityEvent], assess: str, paginated: bool = False) -> str:
+        """生成海报 HTML；PDF 使用 A4 分页，图片继续使用长海报。"""
         esc = html.escape
         date_cn = self._date_cn()
 
@@ -282,7 +282,26 @@ class ReportService:
   setTimeout(fit, 120);
   setTimeout(fit, 350);
 })();
-</script>"""
+</script>""" if not paginated else ""
+
+        print_css = """\n@page{size:A4;margin:12mm}\n@media print{
+body{padding:0;background:#fff;line-height:1.45}
+.page{max-width:none;width:100%}
+.header{padding:18px 24px;margin-bottom:12px;border-radius:10px;box-shadow:none}
+.header h1{font-size:24px}.header h1 .logo{font-size:25px}
+.header .sub{font-size:11px;margin-top:3px}.stats{margin-top:10px;gap:6px}
+.badge{padding:2px 9px;font-size:10px}.badge-num{font-size:13px}
+.assess{padding:11px 15px;margin-bottom:13px;border-radius:9px;box-shadow:none;break-inside:avoid}
+.assess h2{font-size:13px;margin-bottom:5px}.assess .text{font-size:11px;line-height:1.5}
+.sector-block{margin-bottom:12px;border-radius:0;box-shadow:none;overflow:visible;border:0;break-inside:avoid;page-break-inside:avoid}
+.sector-head{padding:7px 12px;border-radius:5px;break-after:avoid}
+.sector-icon{width:25px;height:25px;font-size:15px;border-radius:5px}
+.sector-title{font-size:13px}.sector-count{font-size:10px;padding:1px 8px}
+.sector-body{padding:0 4px}.item{padding:8px 7px;break-inside:avoid;page-break-inside:avoid}
+.item-head{margin-bottom:3px}.item-title{font-size:12px;line-height:1.35}
+.item-summary{font-size:10.5px;line-height:1.5}.item-meta{margin-top:4px}
+.tag,.src,.sev{font-size:9px}.footer{display:none}
+}\n""" if paginated else ""
 
         return f"""<!DOCTYPE html>
 <html lang="zh"><head><meta charset="utf-8">
@@ -341,6 +360,7 @@ body{{font-family:-apple-system,"Segoe UI","Microsoft YaHei","PingFang SC",sans-
 /* 打印：去默认页边距、body 内边距归零，让 PDF 铺满海报画布、背景贯通 */
 @page{{margin:0}}
 @media print{{body{{padding:0}}}}
+{print_css}
 </style></head><body>
 <div class="page">
   <div class="header">
@@ -520,7 +540,7 @@ body{{font-family:-apple-system,"Segoe UI","Microsoft YaHei","PingFang SC",sans-
 
     # ---------- PDF（海报卡片风，经浏览器无头打印） ----------
     def render_pdf(self, events: List[SecurityEvent], assess: str) -> bytes:
-        poster_html = self.render_poster_html(events, assess)
+        poster_html = self.render_poster_html(events, assess, paginated=True)
 
         # 写临时 HTML（用绝对路径，避免 Edge 相对路径解析问题）
         tmp_html = (self.output_dir / f"_poster_{self._date_str()}.html").resolve()

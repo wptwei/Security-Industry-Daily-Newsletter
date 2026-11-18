@@ -85,6 +85,15 @@ def test_tagger_dimensions():
     assert "地域" in e.tag_label()
 
 
+def test_tagger_does_not_use_incidental_body_mentions():
+    event = _ev("AI video security investment survey",
+                raw="The report mentions barriers to adoption and Axis as an unrelated example.")
+    Tagger().tag(event)
+    assert "道闸" not in event.tags["product"]
+    assert "Axis" not in event.tags["company"]
+    assert "投资" in event.tags["event"]
+
+
 def test_tagger_merge_acquisition():
     t = Tagger()
     e = _ev("Bosch acquires access control firm in Germany")
@@ -291,3 +300,34 @@ def test_classifier_extra_keywords():
     )
     assert c.is_physical_security(_ev("实体防护方案发布", category="personnel")) is True
     assert c.is_physical_security(_ev("渗透测试服务", category="personnel")) is False
+
+
+def test_vertical_article_uses_headline_topic_over_incidental_body_terms():
+    classifier = Classifier()
+    event = _ev(
+        "Xonar selected as screening partner by sports venue",
+        source="rss:internationalsecurityjournal.com", category="personnel",
+        raw="Xonar selected as screening partner. The article also discusses cyber risks and regulation.",
+    )
+    event.category = classifier.classify(event)
+    assert event.category == "personnel"
+    assert classifier.is_physical_security(event)
+
+    unrelated = _ev("Cyber insurance premiums rise", source="rss:securitymagazine.com",
+                    category="personnel")
+    unrelated.category = classifier.classify(unrelated)
+    assert not classifier.is_physical_security(unrelated)
+    camera_cyber = _ev("Camera firmware vulnerability exploited", source="rss:securitysales.com",
+                       category="personnel")
+    camera_cyber.category = classifier.classify(camera_cyber)
+    assert not classifier.is_physical_security(camera_cyber)
+
+
+def test_vertical_sector_uses_explicit_headline_subject():
+    sector = SectorClassifier()
+    summit = _ev("World Police Summit opens in Dubai", source="rss:australiansecuritymagazine.com.au",
+                 raw="The conference discusses surveillance, cameras, integration and other security systems.")
+    screening = _ev("Xonar selected as screening partner", source="rss:internationalsecurityjournal.com",
+                    raw="The announcement also covers AI integration and cloud platforms.")
+    assert sector.classify(summit) == "summit"
+    assert sector.classify(screening) == "hardware"

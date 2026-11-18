@@ -91,7 +91,7 @@ jobs:
           FILTER_POSITIVE=physical security,access control,perimeter,surveillance,intrusion detection,critical infrastructure,周界,门禁,视频监控,实体防护,物防技防,入侵探测
           FILTER_NEGATIVE=cyber security,vulnerability,exploit,malware,漏洞,病毒,渗透,网络攻击
           TOP_N=15
-          EMERGENCY_QUOTA=2
+          EMERGENCY_QUOTA=1
           DEDUP_DAYS=7
           TIME_WINDOW_HOURS=72
           MAX_PER_SOURCE=6

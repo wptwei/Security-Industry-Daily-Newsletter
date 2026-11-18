@@ -1,6 +1,6 @@
 """四维标签打标：地域 / 企业 / 产品 / 事件。
 
-针对物理安防行业情报，从事件标题与原文中识别四类标签：
+针对物理安防行业情报，从事件标题中识别四类标签：
 - 地域：国家/地区（覆盖全球各区域安防市场动态）
 - 企业：安防行业重点企业及产业链企业
 - 产品：视频监控、门禁、报警等细分产品
@@ -145,7 +145,8 @@ class Tagger:
     """为 SecurityEvent 打上四维标签。"""
 
     def tag(self, event: SecurityEvent) -> SecurityEvent:
-        text = f"{event.title} {event.raw}".lower()
+        # 正文中的背景、案例、引述和作者信息容易误标成报道主体。
+        text = event.original_title.lower()
         event.tags = {
             "region": self._match(text, REGION_KEYWORDS),
             "company": self._match(text, COMPANY_KEYWORDS),

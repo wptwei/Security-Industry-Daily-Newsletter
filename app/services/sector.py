@@ -86,6 +86,7 @@ INDUSTRY_SOURCES = (
     "securityjournal", "securitylink", "send2press", "revistaseguranca",
     "internationalsecurityjournal", "securityinfowatch", "sdmmag",
     "securitytoday", "ifsecglobal", "securitymagazine", "asmag",
+    "securitysales", "australiansecuritymagazine", "tma.us", "security.world",
 )
 
 
@@ -94,9 +95,21 @@ class SectorClassifier:
 
     def classify(self, event: SecurityEvent) -> str:
         text = f"{event.title} {event.raw} {event.summary}".lower()
+        title = event.original_title.lower()
 
         # 行业垂直媒体来源：直接走行业子类匹配，不判突发事件
         from_industry_source = any(s in event.source for s in INDUSTRY_SOURCES)
+
+        # 明确的标题主题优先，避免长正文中高频通用词抢走分组。
+        if from_industry_source:
+            if any(word in title for word in ("summit", "conference", "exhibition", "峰会", "安博会")):
+                return "summit"
+            if any(word in title for word in ("drone", "robot", "roameo", "unmanned", "无人机", "机器人")):
+                return "robot"
+            if any(word in title for word in ("screening", "安检")):
+                return "hardware"
+            if any(word in title for word in ("acquisition", "acquires", "merger", "并购", "收购")):
+                return "industry"
 
         # 突发事件判定：仅对非行业来源、且命中紧急关键词的事件。
         # 聚焦物理安防：只对 terror（恐袭）/ disaster（灾害）/ personnel（人身安全）判定，

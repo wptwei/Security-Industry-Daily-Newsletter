@@ -66,7 +66,9 @@ python -m app.main --schedule
 | `RSS_FEEDS` | 30 个默认源 | `URL\|领域`，逗号分隔，可自行增删（含安防行业信源） |
 | `HTML_SITES` | `21csp,afzhan,asmag` | 中文安防门户 HTML 直采（无 RSS 的服务端渲染站点，见 [app/collectors/html.py](app/collectors/html.py)） |
 | `HTML_LIMIT` | `10` | 每个 HTML 站点最多抓取的文章数 |
-| `TOP_N` | `8` | 每日最终上报条数（5-15 条，行业事件优先 + 突发事件限量） |
+| `TOP_N` | `15` | 每日最多上报条数，优先选择有正文的垂直行业报道 |
+| `EMERGENCY_QUOTA` | `1` | 突发事件每天最多 1 条（地震/恐袭/灾害） |
+| `RSS_LIMIT` | `30` | 每个 RSS 信源读取的候选条数 |
 | `MAX_PER_SOURCE` | `6` | 单来源配额（同一 source 名最多入选条数，0=不限制，避免聚合源霸屏） |
 | `DEDUP_DAYS` | `7` | 去重窗口（天） |
 | `TIME_WINDOW_HOURS` | `72` | 新闻时间窗（小时），72h 覆盖周末，避免周一漏掉周五行业新闻 |
@@ -125,7 +127,7 @@ python -m app.main --schedule
 
 - **聚焦过滤**：`app/services/classifier.py` 的 `PHYSICAL_SECURITY_CATEGORIES` 定义物理安防保留领域（terror / disaster / personnel）；`BriefAgent.run_daily()` 会用 `Classifier.is_physical_security()` 自动过滤掉 cyber / compliance / health / geopolitical / unrest 类事件。如需调整聚焦范围，改这个集合即可。
 - **行业子类**：`app/services/sector.py` 把事件归入 9 个行业子类（物理安防/安防硬件/周界防护/AI安防/智能安防/安防峰会/行业动态/安防机器人/无人机/突发事件），简报与海报按子类分组。
-- **精准精选**：`BriefAgent._select_top()` 优先高严重度的行业事件，突发事件（地缘/恐袭/灾害等）限量补充（至多总量的 1/3、不超过 3 条），总量控制在 `TOP_N`（默认 8，可配 5-15）。
+- **精准精选**：`BriefAgent._select_top()` 优先有正文的垂直行业报道，在完整候选池中应用来源和主题限额；Google News 聚合源最多入选 2 条，普通监控画面和促销稿排除。突发事件由 `EMERGENCY_QUOTA` 单独控制，默认 1（每天最多 1 条）。
 - **相似事件去重**：同主题事件（地震/袭击/火灾/并购等，按 `_similarity_key` 判定）最多推 2 条，**不限制国家**，只减少同质事件堆叠。
 - **USGS 源头降采样**：`USGSCollector` 默认每国家/地区最多 1 条，避免推送里堆砌一堆同区域小震。
 - **四维打标**：`app/services/tagger.py` 用规则关键词识别「地域 / 企业 / 产品 / 事件」四维标签，存入 `SecurityEvent.tags` 并在简报、HTML、海报中展示。企业、产品、事件关键词表可在 `tagger.py` 顶部按需扩充。
@@ -168,7 +170,7 @@ schtasks /Create /TN "SecurityIntelDailyBrief" /TR "\"C:\vscode project\security
 
 注意事项：
 
-- **海报 PDF**：工作流会显式安装 Google Chrome + 中文字体，云端同样用 Chrome 无头打印生成与海报配色一致的长图 PDF；若浏览器不可用，会自动回退 reportlab 的「海报配色版」（深蓝标题、彩色分类头，颜色与海报同步，仅无渐变/圆角/emoji）。
+- **海报 PDF**：工作流会显式安装 Google Chrome + 中文字体，云端同样用 Chrome 无头打印生成 A4 分页 PDF；邮件海报图片仍是长图。若浏览器不可用，会自动回退 reportlab 的简洁版。
 - **跨天去重**：通过 Actions 缓存持久化 `history.json`，云端也能「N 天内不重复上报」。
 - **改运行频率**：编辑工作流里的 `cron`；想每天（含周末）跑就把 `1-5` 改成 `*`。
 - **免费额度**：public 仓库 Actions 免费不限量；private 仓库每月 2000 分钟（每天约 2-3 分钟，够用）。

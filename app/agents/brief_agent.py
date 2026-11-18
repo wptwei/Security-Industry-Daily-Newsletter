@@ -1,6 +1,7 @@
 """安防情报智能体：编排 采集 -> 去重 -> 分类分级 -> 摘要 -> 报告 -> 推送。"""
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 from typing import List
 
@@ -13,7 +14,7 @@ from app.services.report import ReportService
 from app.services.severity import SeverityRater
 from app.services.summarizer import Summarizer
 from app.services.tagger import Tagger
-from app.services.sector import SectorClassifier
+from app.services.sector import INDUSTRY_SOURCES, SectorClassifier
 from app.services.sensitive import SensitiveFilter
 from app.utils.logging import get_logger
 
@@ -36,7 +37,7 @@ class BriefAgent:
         top_n: int = 15,
         severity_highlight: int = 4,
         time_window_hours: int = 24,
-        emergency_quota: int = 2,
+        emergency_quota: int = 0,
         max_per_source: int = 0,
     ) -> None:
         self.collectors = collectors
@@ -56,16 +57,21 @@ class BriefAgent:
         self.max_per_source = max_per_source
 
     def fetch_events(self) -> List[SecurityEvent]:
-        events: List[SecurityEvent] = []
-        for collector in self.collectors:
+        def collect_one(collector: BaseCollector) -> List[SecurityEvent]:
             try:
                 batch = collector.collect()
                 logger.info("采集器 %s 采集到 %d 条", collector.name, len(batch))
-                events.extend(batch)
+                return batch
             except NotImplementedError as exc:
                 logger.warning("采集器 %s 未实现：%s", collector.name, exc)
             except Exception as exc:  # 单个采集器失败不影响整体
                 logger.error("采集器 %s 失败：%s", collector.name, exc)
+            return []
+
+        events: List[SecurityEvent] = []
+        with ThreadPoolExecutor(max_workers=min(8, max(1, len(self.collectors)))) as pool:
+            for batch in pool.map(collect_one, self.collectors):
+                events.extend(batch)
         return events
 
     def _filter_recent(self, events: List[SecurityEvent]) -> List[SecurityEvent]:
@@ -187,71 +193,87 @@ class BriefAgent:
         # 未命中主题词时，用 sector 兜底
         return e.sector
 
+    @staticmethod
+    def _editorial_score(e: SecurityEvent) -> int:
+        """优先保留垂直媒体和有可核实正文的行业报道。"""
+        title = e.original_title.lower()
+        source = e.source.lower()
+        has_body = len((e.raw or "").strip()) >= len(e.original_title) + 80
+        vertical = any(host in source for host in INDUSTRY_SOURCES)
+        score = (5 if vertical else 0) + (3 if has_body else -2)
+        if "news.google.com" in source:
+            score -= 3
+        if any(term in title for term in (
+            "launch", "deploy", "integrat", "install", "upgrade", "partnership",
+            "selected as", "screening", "improv",
+            "report", "survey", "guide", "standard", "investment", "acqui",
+            "发布", "部署", "集成", "安装", "升级", "合作", "报告", "调研", "指南", "标准", "投资",
+        )):
+            score += 2
+        return score
+
+    @staticmethod
+    def _is_editorial_noise(e: SecurityEvent) -> bool:
+        """排除摄像头偶然拍到的社会杂闻和促销稿。"""
+        title = e.original_title.lower()
+        if any(term in title for term in (
+            "discount", "deal", "sale price", "% off", "black friday",
+            "降价", "折扣", "优惠", "促销", "大减价",
+        )):
+            return True
+        return any(term in title for term in (
+            "caught on camera", "caught on security camera", "captured on camera",
+            "captured by security camera", "seen on cctv", "security camera catches",
+            "camera captures", "camera caught", "surveillance footage shows",
+            "摄像头拍到", "监控拍到", "监控曝光", "监控画面显示",
+        ))
+
     def _select_top(self, events: List[SecurityEvent]) -> List[SecurityEvent]:
         """精准精选：行业事件优先，突发事件固定限量，总量控制在 top_n。
 
-        策略：
-        1. 行业事件（非 emergency）按严重度降序优先入选，最多 top_n - emergency_quota 条。
-        2. 突发事件（地缘/恐袭/灾害等）固定最多 emergency_quota 条（默认 2），
-           不因行业不足而补足，从而压低突发事件占比。
-        3. 相似事件去重：同类主题（地震/袭击/火灾/并购等）最多推 2 条，
-           不限制国家，只减少同质事件。
-        4. 总数最多 top_n，行业不足时总条数会少于 top_n（宁缺毋滥）。
+        行业报道按信源和正文质量排序，突发事件单独限额。
+        在完整候选池上应用配额，避免提前截断造成空位无法补齐。
         """
-        industry = [e for e in events if e.sector != "emergency"]
+        industry = [e for e in events if e.sector != "emergency" and not self._is_editorial_noise(e)]
         emergency = [e for e in events if e.sector == "emergency"]
 
-        industry.sort(key=lambda e: (-e.severity, e.title))
+        industry.sort(key=lambda e: (-self._editorial_score(e), -e.severity, e.title))
         emergency.sort(key=lambda e: (-e.severity, e.title))
-
-        selected_industry = industry[: self.top_n - self.emergency_quota]
-        selected_emergency = emergency[: self.emergency_quota]
-
-        selected = selected_industry + selected_emergency
 
         # 相似事件去重：同主题最多 2 条（不限制国家）
         # 单来源配额：同一 source 名最多 max_per_source 条（0=不限制）
-        selected.sort(key=lambda e: (-e.severity, e.title))
         result: List[SecurityEvent] = []
         topic_count: dict = {}  # pyright: ignore[reportMissingTypeArgument]
         source_count: dict = {}  # pyright: ignore[reportMissingTypeArgument]
         max_per_source = getattr(self, "max_per_source", 0) or 0
 
         def _allow(e: SecurityEvent) -> bool:
-            topic = self._similarity_key(e)
+            topic = self._similarity_key(e) if e.sector == "emergency" else e.uid
             if topic_count.get(topic, 0) >= 2:
                 return False
-            if max_per_source and source_count.get(e.source, 0) >= max_per_source:
+            source_cap = min(max_per_source, 2) if max_per_source and "news.google.com" in e.source else max_per_source
+            if "news.google.com" in e.source and not source_cap:
+                source_cap = 2
+            if source_cap and source_count.get(e.source, 0) >= source_cap:
                 return False
             return True
 
         def _commit(e: SecurityEvent) -> None:
-            topic = self._similarity_key(e)
+            topic = self._similarity_key(e) if e.sector == "emergency" else e.uid
             topic_count[topic] = topic_count.get(topic, 0) + 1
             source_count[e.source] = source_count.get(e.source, 0) + 1
 
-        for e in selected:
-            if not _allow(e):
-                continue
-            result.append(e)
-            _commit(e)
-            if len(result) >= self.top_n:
-                break
-
-        # 若去重后不足 top_n，用剩余事件补足
-        if len(result) < self.top_n:
-            used = set(e.uid for e in result)
-            for e in selected:
-                if e.uid in used:
-                    continue
+        for pool, limit in ((industry, max(0, self.top_n - self.emergency_quota)),
+                            (emergency, max(0, self.emergency_quota))):
+            added = 0
+            for e in pool:
+                if added >= limit or len(result) >= self.top_n:
+                    break
                 if not _allow(e):
                     continue
                 result.append(e)
-                used.add(e.uid)
                 _commit(e)
-                if len(result) >= self.top_n:
-                    break
+                added += 1
 
-        # 最终按严重度降序稳定排序
-        result.sort(key=lambda e: (-e.severity, e.title))
+        result.sort(key=lambda e: (e.sector == "emergency", -self._editorial_score(e), -e.severity, e.title))
         return result
