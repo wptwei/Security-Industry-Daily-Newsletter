@@ -102,7 +102,8 @@ jobs:
           SMTP_USER=${{ secrets.SMTP_USER }}
           SMTP_PASS=${{ secrets.SMTP_PASS }}
           SMTP_FROM=${{ secrets.SMTP_USER }}
-          EMAIL_TO=${{ secrets.EMAIL_TO }}
+          EMAIL_TO=Jinxi.AnBao2BU@luxshare-ict.com
+          EMAIL_CC=Coach Yang(杨勇) <Coach.Yang@luxshare-ict.com>,Huaxi Zhang(张华希) <Huaxi.Zhang@luxshare-ict.com>,Lei Guo(郭磊) <Lei.Guo@luxshare-ict.com>
           PROXY_HTTP=
           PROXY_HTTPS=
           OUTPUT_DIR=output
