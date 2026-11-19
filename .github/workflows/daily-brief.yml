@@ -61,8 +61,7 @@ jobs:
             history-
 
       # 云端 runner 在美国，可直接访问 GDELT/USGS/BBC 等境外源，因此 PROXY 留空。
-      # 密钥（LLM_API_KEY / SMTP_USER / SMTP_PASS / EMAIL_TO）来自仓库 Secrets，
-      # 不会写入仓库，也不会出现在日志里（GitHub 会自动脱敏）。
+      # 只有 LLM_API_KEY 来自仓库 Secrets；SMTP 已停用，云端只生成报告产物（含 .eml），不自动发邮件。
       - name: 生成 .env
         run: |
           mkdir -p output
@@ -97,11 +96,11 @@ jobs:
           MAX_PER_SOURCE=6
           SEVERITY_HIGHLIGHT=4
           HISTORY_FILE=output/history.json
-          SMTP_HOST=smtp.qq.com
-          SMTP_PORT=465
-          SMTP_USER=${{ secrets.SMTP_USER }}
-          SMTP_PASS=${{ secrets.SMTP_PASS }}
-          SMTP_FROM=${{ secrets.SMTP_USER }}
+          SMTP_HOST=
+          SMTP_PORT=25
+          SMTP_USER=
+          SMTP_PASS=
+          SMTP_FROM=Pingting.Wei@luxshare-ict.com
           EMAIL_TO=Jinxi.AnBao2BU@luxshare-ict.com
           EMAIL_CC=Coach Yang(杨勇) <Coach.Yang@luxshare-ict.com>,Huaxi Zhang(张华希) <Huaxi.Zhang@luxshare-ict.com>,Lei Guo(郭磊) <Lei.Guo@luxshare-ict.com>
           PROXY_HTTP=
@@ -111,7 +110,7 @@ jobs:
           LOG_LEVEL=INFO
           EOF
 
-      - name: 采集 + 生成海报 + 邮件推送
+      - name: 采集 + 生成海报（不自动发邮件）
         run: python -m app.main --once
 
       # 无论成败都上传当日产物，方便核对海报与排查（7 天后自动过期）
@@ -125,5 +124,6 @@ jobs:
             output/security_daily_report_*.html
             output/security_daily_report_*.json
             output/security_daily_report_*.pdf
+            output/security_daily_report_*.eml
           if-no-files-found: ignore
           retention-days: 7
