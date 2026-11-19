@@ -1,15 +1,13 @@
 name: Security Intel Daily Brief
 
-# 全球安防情报自动化 —— 云端定时任务（GitHub Actions）
+# 全球安防情报 —— 云端手动任务（GitHub Actions）
 #
-# GitHub Actions 的 cron 使用 UTC 时间，北京时间 = UTC + 8 小时。
-#   08:30 北京时间  =  00:30 UTC
-#
-# 默认「周一~周五」运行。如需每天（含周末）运行，把下面的 `1-5` 改成 `*`。
+# 定时（cron）已停用：云端只允许手动触发，不再自动运行。
+# 如需恢复定时，在 on 下重新加：
+#   schedule:
+#     - cron: '30 0 * * 1-5'
 on:
-  schedule:
-    - cron: '30 0 * * 1-5'
-  workflow_dispatch: {}   # 支持在 GitHub 网页上手动点「Run workflow」，便于测试
+  workflow_dispatch: {}   # 仅支持在 GitHub 网页上手动点「Run workflow」
 
 permissions:
   contents: read
