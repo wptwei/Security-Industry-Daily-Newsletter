@@ -87,6 +87,10 @@ INDUSTRY_SOURCES = (
     "internationalsecurityjournal", "securityinfowatch", "sdmmag",
     "securitytoday", "ifsecglobal", "securitymagazine", "asmag",
     "securitysales", "australiansecuritymagazine", "tma.us", "security.world",
+    # 以下按「原始媒体名」匹配（Google 新闻聚合时会带上）
+    "securityweek", "sourcesecurity", "benchmarkmagazine", "asiapacificsecurity",
+    "securitysolutions", "securitymiddleeast", "securityindustry", "asisonline",
+    "securitysystemsnews", "securitybusiness",
 )
 
 
@@ -98,7 +102,8 @@ class SectorClassifier:
         title = event.original_title.lower()
 
         # 行业垂直媒体来源：直接走行业子类匹配，不判突发事件
-        from_industry_source = any(s in event.source for s in INDUSTRY_SOURCES)
+        source_haystack = f"{event.source} {event.origin}".lower()
+        from_industry_source = any(s in source_haystack for s in INDUSTRY_SOURCES)
 
         # 明确的标题主题优先，避免长正文中高频通用词抢走分组。
         if from_industry_source:

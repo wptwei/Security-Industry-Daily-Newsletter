@@ -83,10 +83,20 @@ class RSSCollector(BaseCollector):
                     except (TypeError, ValueError):
                         published = None
                     break
+            # Google 新闻等聚合源会带上原始媒体名（如 SecurityWeek），用于展示
+            origin = ""
+            source_info = entry.get("source")
+            if source_info is not None:
+                origin = (source_info.get("title") or "").strip()
+            # 标题末尾常带「 - 媒体名」，去掉避免重复
+            if origin and title.endswith(f" - {origin}"):
+                title = title[: -len(f" - {origin}")].strip()
+
             events.append(
                 SecurityEvent(
                     title=title,
                     source=self.name,
+                    origin=origin,
                     url=link,
                     category=self.category,
                     raw=f"{title}. {raw_body}" if raw_body else title,

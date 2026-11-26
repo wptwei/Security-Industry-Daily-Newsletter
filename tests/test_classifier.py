@@ -61,17 +61,20 @@ def test_severity_keyword():
 def test_is_physical_security():
     c = Classifier()
     # 物理安防领域 + 命中相关性关键词 -> 保留
-    assert c.is_physical_security(_ev("Magnitude 6.2 earthquake strikes", category="disaster")) is True
     assert c.is_physical_security(_ev("Hikvision launches surveillance camera", category="personnel")) is True
-    assert c.is_physical_security(_ev("Terror attack injures civilians", category="terror")) is True
+    # 暴力事件（袭击/恐袭/枪击等）不再收录
+    assert c.is_physical_security(_ev("Terror attack injures civilians", category="terror")) is False
+    assert c.is_physical_security(_ev("Gunmen attack a security camera factory", category="personnel")) is False
+    assert c.is_physical_security(_ev("某地发生枪击事件，监控设备被毁", category="personnel")) is False
+    # 自然灾害（地震等）不再收录，即使是权威信源
+    assert c.is_physical_security(_ev("Magnitude 6.2 earthquake strikes", category="disaster")) is False
+    assert c.is_physical_security(_ev("M7.1 earthquake", source="usgs", category="disaster")) is False
     # 非物理安防领域 -> 过滤
     for cat in ("cyber", "compliance", "health"):
         assert c.is_physical_security(_ev("Ransomware attack", category=cat)) is False
     # 地缘政治/社会骚乱（非物理安防重点）-> 过滤
     assert c.is_physical_security(_ev("Two killed in border clash", category="geopolitical")) is False
     assert c.is_physical_security(_ev("Anti-immigration riot escalates", category="unrest")) is False
-    # 权威信源直接采信（无需关键词）
-    assert c.is_physical_security(_ev("M7.1 earthquake", source="usgs", category="disaster")) is True
 
 
 def test_tagger_dimensions():

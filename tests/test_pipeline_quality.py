@@ -52,6 +52,96 @@ def test_duplicate_sources_keep_more_complete_article(tmp_path):
     assert store.filter([short]) == []
 
 
+def test_similar_titles_are_deduplicated_across_days(tmp_path):
+    """同一事件的不同媒体改写标题，跨天也应判为重复，降低重合度。"""
+    store = DedupStore(tmp_path / "history.json")
+    first = SecurityEvent(
+        title="Hikvision launches new AI surveillance camera for commercial sites",
+        source="rss:a", url="https://a.example/1",
+    )
+    store.mark_seen([first])
+    store.save()
+
+    again = DedupStore(tmp_path / "history.json")
+    rewritten = SecurityEvent(
+        title="Hikvision launches a new AI surveillance camera for commercial sites",
+        source="rss:b", url="https://b.example/2",
+    )
+    unrelated = SecurityEvent(
+        title="Dahua unveils perimeter radar for data center security",
+        source="rss:c", url="https://c.example/3",
+    )
+    kept = again.filter([rewritten, unrelated])
+    assert [e.title for e in kept] == [unrelated.title]
+
+
+def test_same_conference_reports_are_merged():
+    """同一场会议的多篇报道（标题不同）应合并为一条，保留正文更完整的。"""
+    agent = BriefAgent.__new__(BriefAgent)
+    short = SecurityEvent(title="Milestone年度开发者峰会汇聚合作伙伴", source="rss:a", raw="短" * 80)
+    full = SecurityEvent(title="Milestone峰会探讨AI辅助视频操作员", source="rss:b", raw="长" * 200)
+    other = SecurityEvent(title="Hikvision峰会展示新品", source="rss:c", raw="中" * 120)
+    for e in (short, full, other):
+        e.sector = "summit"
+        e.tags = {"region": [], "company": [], "product": [], "event": ["峰会"]}
+    merged = agent._dedupe_event_reports([short, full, other])
+    assert [e.title for e in merged] == [full.title, other.title]
+
+
+def test_article_body_extraction():
+    """入选条目补抓正文：能取到正文段落、丢弃导航噪音。"""
+    from app.utils.article import _extract_main_text
+
+    markup = (
+        "<html><body><nav>首页 产品 联系</nav>"
+        "<article><p>" + "这是一段足够长的正文内容，用于验证提取逻辑是否有效。" * 3 + "</p></article>"
+        "<footer>版权信息</footer></body></html>"
+    )
+    text = _extract_main_text(markup, 1000)
+    assert "这是一段足够长的正文内容" in text
+    assert "首页" not in text
+
+
+def test_article_fetch_skips_google_news_links():
+    """Google 新闻跳转链接无法直取正文，应直接跳过（不发请求）。"""
+    from app.utils.article import fetch_article_text
+
+    assert fetch_article_text("https://news.google.com/rss/articles/abc") == ""
+
+
+def test_assessment_drops_credibility_disclaimers():
+    """研判里不应出现「可信度低」这类空泛评价。"""
+    from app.services.summarizer import _strip_credibility_notes
+
+    text = "今日共 8 条情报，安防峰会方向活跃。部分来源可信度较低，仅供参考。物理安防方向以新品发布为主。"
+    cleaned = _strip_credibility_notes(text)
+    assert "可信度" not in cleaned
+    assert "安防峰会" in cleaned and "物理安防" in cleaned
+
+
+def test_disasters_are_excluded_from_report():
+    """地震等自然灾害不再收录。"""
+    from app.services.classifier import Classifier
+
+    classifier = Classifier()
+    quake = SecurityEvent(
+        title="Magnitude 6.2 earthquake strikes region", source="rss:test", category="disaster"
+    )
+    assert classifier.is_physical_security(quake) is False
+
+
+def test_report_footer_uses_department_brand(tmp_path):
+    report = ReportService(tmp_path)
+    event = SecurityEvent(title="Access control product launch", source="rss:sdmmag.com", summary="详情")
+    markdown = report.render_markdown([event], "研判")
+    assert "华东安保二部" in markdown
+    assert "数据来源" not in markdown
+    assert "AI 摘要引擎" not in markdown
+    # 来源显示媒体名而非内部采集器标识
+    assert "SDM Magazine" in markdown
+    assert "rss:sdmmag.com" not in markdown
+
+
 def test_html_date_has_china_timezone():
     date = _extract_date("发布时间：2026-11-16 09:30", "https://example.test/a")
     assert date.utcoffset() == timedelta(hours=8)
@@ -59,17 +149,19 @@ def test_html_date_has_china_timezone():
     assert _extract_date("no date", "https://example.test/news/202611/a") is None
 
 
-def test_report_includes_safe_source_link(tmp_path):
+def test_report_does_not_expose_source_links(tmp_path):
+    """安全要求：日报正文不显示原文链接，也不暴露来源域名。"""
     report = ReportService(tmp_path)
     event = SecurityEvent(
         title="Security camera update", source="rss:test",
         url="https://example.test/article?utm_source=feed",
     )
     item = report._markdown_item(event)
-    assert "查看原文" in item
-    assert "https://example.test/article" in item
-    event.url = "javascript:alert(1)"
-    assert "查看原文" not in report._markdown_item(event)
+    assert "查看原文" not in item
+    assert "https://example.test/article" not in item
+    poster = report._poster_item_html(event)
+    assert "原文" not in poster
+    assert "https://example.test/article" not in poster
 
 
 def test_reliefweb_body_is_used_for_summary_input():

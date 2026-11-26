@@ -7,11 +7,11 @@ from __future__ import annotations
 
 import html
 import json
+import re
 import subprocess
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Dict, List
-from urllib.parse import quote, urlsplit
 
 from app.models.event import SecurityEvent
 from app.utils.logging import get_logger
@@ -135,15 +135,59 @@ class ReportService:
             grouped.setdefault(e.sector, []).append(e)
         return grouped
 
+    # 来源显示名：只展示媒体名称，不展示内部采集器标识与链接
+    SOURCE_LABELS = {
+        "news.google.com": "公开媒体聚合",
+        "securitymagazine.com": "Security Magazine",
+        "sdmmag.com": "SDM Magazine",
+        "securityinfowatch.com": "SecurityInfoWatch",
+        "securitysales.com": "Security Sales & Integration",
+        "australiansecuritymagazine.com.au": "Australian Security Magazine",
+        "tma.us": "The Monitoring Association",
+        "security.world": "Security.World",
+        "send2press.com": "Send2Press",
+        "securityjournaluk.com": "Security Journal UK",
+        "internationalsecurityjournal.com": "International Security Journal",
+        "securitylinkindia.com": "SecurityLink India",
+        "revistasegurancaeletronica.com.br": "Revista Segurança Eletrônica",
+        "html:21csp": "中国安防行业网",
+        "html:afzhan": "安防展览网",
+        "html:asmag": "安防知识网",
+        "gdelt": "GDELT",
+        "usgs": "USGS",
+        "cisa": "CISA",
+        "nvd": "NVD",
+        "reliefweb": "ReliefWeb",
+        # Google 新闻带回的原始媒体域名
+        "benchmarkmagazine.com": "Benchmark Magazine",
+        "sourcesecurity.com": "SourceSecurity",
+        "securityweek.com": "SecurityWeek",
+        "ifsecglobal.com": "IFSEC Global",
+        "securityindustry.org": "SIA",
+        "asisonline.org": "ASIS International",
+        "securitymiddleeast.com": "Security Middle East",
+        "asiapacificsecuritymagazine.com": "Asia Pacific Security Magazine",
+        "securitysolutions.com.au": "Security Solutions",
+        "securityinformed.com": "SecurityInformed",
+        "securitysystemsnews.com": "Security Systems News",
+        "campussafetymagazine.com": "Campus Safety",
+        "csdn.net": "CSDN",
+    }
+
     @staticmethod
-    def _source_url(event: SecurityEvent) -> str:
-        try:
-            parsed = urlsplit(event.url or "")
-        except ValueError:
-            return ""
-        if parsed.scheme.lower() not in ("http", "https") or not parsed.hostname or parsed.username:
-            return ""
-        return quote(event.url, safe=":/?&=%#@+,-._~;")
+    def _source_label(event: SecurityEvent) -> str:
+        # 聚合源（Google 新闻）优先显示原始媒体名
+        raw = (event.origin or "").strip() or (event.source or "").strip()
+        key = raw[4:] if raw.startswith("rss:") else raw
+        key_l = key.lower().removeprefix("www.")
+        for name, label in ReportService.SOURCE_LABELS.items():
+            if key_l == name or key_l.endswith("." + name):
+                return label
+        # 未收录的域名：去掉常见后缀后按品牌名显示
+        brand = re.sub(r"\.(com|net|org|cn|io|co)(\.[a-z]{2})?$", "", key_l)
+        if brand and brand != key_l and brand.isascii():
+            return brand.title()
+        return key or "公开信源"
 
     @staticmethod
     def _published_label(event: SecurityEvent) -> str:
@@ -174,26 +218,22 @@ class ReportService:
             for e in items:
                 lines.append(self._markdown_item(e))
             lines.append("")
-        lines.append("## 数据来源")
+        lines.append("---")
         lines.append("")
-        sources = sorted({e.source for e in events})
-        lines.append("、".join(sources))
+        lines.append("华东安保二部")
         return "\n".join(lines)
 
     @staticmethod
     def _markdown_item(e: SecurityEvent) -> str:
         place = f" · {e.country}" if e.country else ""
         tag = f" `{e.tag_label()}`" if e.tag_label() else ""
-        # 标题（简洁中文总结）+ 摘要（详细提炼）
+        # 标题（简洁中文总结）+ 摘要（详细提炼）；只标来源媒体名，不给原文链接
         title = e.title or ""
         summary = e.summary or ""
-        source = f"来源：{e.source}"
+        source = f"来源：{ReportService._source_label(e)}"
         published = ReportService._published_label(e)
         if published:
-            source += f" · 发布时间：{published}（北京时间）"
-        url = ReportService._source_url(e)
-        if url:
-            source += f" · [查看原文]({url})"
+            source += f" · {published}"
         if title and title != summary:
             return f"- **[{e.severity_label}] {title}**{place} {tag}\n  {summary}\n  {source}".strip()
         return f"- **[{e.severity_label}]** {summary}{place} {tag}\n  {source}".strip()
@@ -237,8 +277,8 @@ class ReportService:
         # 顶部统计徽章
         sectors = {e.sector for e in events}
         stats = (
-            f'<div class="badge"><span class="badge-num">{len(events)}</span>条精选</div>'
-            f'<div class="badge"><span class="badge-num">{len(sectors)}</span>大类别</div>'
+            f'<div class="badge">📰 <span class="badge-num">{len(events)}</span> 条精选</div>'
+            f'<div class="badge">🏷️ <span class="badge-num">{len(sectors)}</span> 大类别</div>'
             f'<div class="badge">🤖 AI 摘要</div>'
         )
 
@@ -255,8 +295,8 @@ class ReportService:
                 items_html.append(self._poster_item_html(e))
             cards.append(
                 f'<div class="sector-block" style="--c:{color}">'
-                f'<div class="sector-head" style="background:linear-gradient(120deg,{color},rgba(0,0,0,0))">'
-                f'<span class="sector-icon" style="background:rgba(255,255,255,.22)">{icon}</span>'
+                f'<div class="sector-head">'
+                f'<span class="sector-icon">{icon}</span>'
                 f'<span class="sector-title">{esc(label)}</span>'
                 f'<span class="sector-count">{len(items)}条</span>'
                 f'</div>'
@@ -293,14 +333,15 @@ body{padding:0;background:#fff;line-height:1.45}
 .badge{padding:2px 9px;font-size:10px}.badge-num{font-size:13px}
 .assess{padding:11px 15px;margin-bottom:13px;border-radius:9px;box-shadow:none;break-inside:avoid}
 .assess h2{font-size:13px;margin-bottom:5px}.assess .text{font-size:11px;line-height:1.5}
-.sector-block{margin-bottom:12px;border-radius:0;box-shadow:none;overflow:visible;border:0;break-inside:avoid;page-break-inside:avoid}
-.sector-head{padding:7px 12px;border-radius:5px;break-after:avoid}
-.sector-icon{width:25px;height:25px;font-size:15px;border-radius:5px}
-.sector-title{font-size:13px}.sector-count{font-size:10px;padding:1px 8px}
-.sector-body{padding:0 4px}.item{padding:8px 7px;break-inside:avoid;page-break-inside:avoid}
-.item-head{margin-bottom:3px}.item-title{font-size:12px;line-height:1.35}
-.item-summary{font-size:10.5px;line-height:1.5}.item-meta{margin-top:4px}
-.tag,.src,.sev{font-size:9px}.footer{display:none}
+.sector-block{margin-bottom:12px;break-inside:auto}
+.sector-head{padding:0 0 5px;margin-bottom:8px;break-after:avoid}
+.sector-icon{font-size:16px}
+.sector-title{font-size:14px}.sector-count{font-size:10px;padding:1px 8px}
+.sector-body{padding:0}
+.item{padding:9px 12px 9px 14px;margin-bottom:8px;border-radius:8px;box-shadow:none;break-inside:avoid;page-break-inside:avoid}
+.item-head{margin-bottom:4px}.item-title{font-size:12px;line-height:1.4}
+.item-summary{font-size:10.5px;line-height:1.6}.item-meta{margin-top:5px}
+.tag,.src,.sev{font-size:9px}
 }\n""" if paginated else ""
 
         return f"""<!DOCTYPE html>
@@ -329,29 +370,28 @@ body{{font-family:-apple-system,"Segoe UI","Microsoft YaHei","PingFang SC",sans-
 .assess h2::before{{content:"";width:6px;height:18px;border-radius:3px;background:#c0392b}}
 .assess .text{{font-size:13.5px;color:#4a4f57;white-space:pre-wrap;line-height:1.8}}
 
-/* 行业子类分组 */
-.sector-block{{background:#fff;border-radius:18px;margin-bottom:20px;overflow:hidden;box-shadow:0 3px 16px rgba(30,45,80,.08);border:1px solid #eef0f4}}
-.sector-head{{display:flex;align-items:center;gap:12px;padding:16px 24px;color:#fff}}
-.sector-icon{{width:38px;height:38px;border-radius:11px;display:flex;align-items:center;justify-content:center;font-size:20px;flex-shrink:0}}
-.sector-title{{font-size:17px;font-weight:700;flex:1;letter-spacing:.5px}}
-.sector-count{{font-size:12px;font-weight:600;background:rgba(255,255,255,.22);border-radius:14px;padding:3px 14px}}
-.sector-body{{padding:6px 18px}}
+/* 行业子类分组：白底 + 彩色标题 + 彩色下划线 */
+.sector-block{{margin-bottom:26px}}
+.sector-head{{display:flex;align-items:center;gap:10px;padding:2px 4px 10px;border-bottom:2px solid var(--c,#2c3e50);margin-bottom:14px}}
+.sector-icon{{font-size:22px;line-height:1;flex-shrink:0}}
+.sector-title{{font-size:19px;font-weight:800;color:var(--c,#2c3e50);letter-spacing:.5px}}
+.sector-count{{font-size:12px;font-weight:700;color:#fff;background:var(--c,#2c3e50);border-radius:12px;padding:2px 11px}}
+.sector-body{{padding:0}}
 
-/* 单条卡片 */
-.item{{padding:16px 6px;border-bottom:1px solid #f1f2f5}}
-.item:last-child{{border-bottom:none}}
-.item-head{{display:flex;align-items:flex-start;gap:10px;margin-bottom:7px}}
-.sev{{font-size:11px;font-weight:700;padding:2px 10px;border-radius:5px;white-space:nowrap;flex-shrink:0;margin-top:1px}}
+/* 单条卡片：白底 + 左侧彩色竖条 + 圆角阴影 */
+.item{{position:relative;background:#fff;border:1px solid #eef0f4;border-left:4px solid var(--c,#2c3e50);border-radius:12px;box-shadow:0 2px 10px rgba(30,45,80,.07);padding:15px 18px 13px;margin-bottom:12px}}
+.item-head{{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:8px}}
+.sev{{font-size:11px;font-weight:700;padding:2px 9px;border-radius:4px;white-space:nowrap;flex-shrink:0;margin-top:3px}}
 .sev5{{color:#c0392b;background:#fdecea}}
 .sev4{{color:#e67e22;background:#fef3e2}}
 .sev3{{color:#d4a017;background:#fdf6e3}}
-.sev2{{color:#27ae60;background:#eafaf1}}
+.sev2{{color:#6b7280;background:#f1f3f5}}
 .sev1{{color:#95a5a6;background:#f2f3f4}}
-.item-title{{font-size:15.5px;font-weight:650;color:#1c1f26;line-height:1.5}}
-.item-summary{{font-size:13px;color:#565b64;margin:2px 0;line-height:1.75}}
-.item-meta{{display:flex;align-items:center;gap:8px;margin-top:8px;flex-wrap:wrap}}
-.tag{{font-size:11px;color:#4e5866;background:#eef1f5;border-radius:4px;padding:2px 9px}}
-.src{{font-size:11px;color:#a2abb8;margin-left:auto}}
+.item-title{{font-size:15.5px;font-weight:700;color:#16213a;line-height:1.5;flex:1}}
+.item-summary{{font-size:13.5px;color:#4b5563;margin:0;line-height:1.85}}
+.item-meta{{display:flex;align-items:center;gap:6px;margin-top:10px;flex-wrap:wrap}}
+.tag{{font-size:11px;color:#5b6472;background:#f1f3f7;border-radius:4px;padding:2px 9px}}
+.src{{font-size:11px;color:#9aa3b2;margin-left:auto}}
 
 /* 底部 */
 .footer{{text-align:center;color:#a2abb8;font-size:11px;margin-top:28px;line-height:1.9}}
@@ -378,8 +418,7 @@ body{{font-family:-apple-system,"Segoe UI","Microsoft YaHei","PingFang SC",sans-
 
   <div class="footer">
     <span class="line"></span><br>
-    🌐 数据来源：{"、".join(sorted({e.source for e in events}))}<br>
-    🤖 AI 摘要引擎 · 全文已内嵌 · 内部参考 · {datetime.now(BEIJING_TZ).year}
+    华东安保二部
   </div>
 </div>
 {fit_script}
@@ -392,15 +431,13 @@ body{{font-family:-apple-system,"Segoe UI","Microsoft YaHei","PingFang SC",sans-
         for t in e.tags.get("product", [])[:3] + e.tags.get("event", [])[:2]:
             tags += f'<span class="tag">{esc(t)}</span>'
         published = self._published_label(e)
-        url = self._source_url(e)
-        source_text = f"来源：{e.source}" + (f" · {published}" if published else "")
-        link = f' · <a href="{esc(url, quote=True)}">原文</a>' if url else ""
-        src = f'<span class="src">{esc(source_text)}{link}</span>'
+        source_text = f"来源：{self._source_label(e)}" + (f" · {published}" if published else "")
+        src = f'<span class="src">{esc(source_text)}</span>'
         return (
             f'<div class="item">'
             f'<div class="item-head">'
-            f'<span class="sev sev{sev}">[{esc(e.severity_label)}]</span>'
             f'<span class="item-title">{esc(e.title)}</span>'
+            f'<span class="sev sev{sev}">{esc(e.severity_label)}</span>'
             f'</div>'
             f'<div class="item-summary">{esc(e.summary)}</div>'
             f'<div class="item-meta">{tags}{src}</div>'
@@ -434,15 +471,13 @@ body{{font-family:-apple-system,"Segoe UI","Microsoft YaHei","PingFang SC",sans-
                 sev_color = SEV_COLORS.get(e.severity, "#000000")
                 tag = f'<span style="color:#8a94a3;font-size:11px;"> {esc(e.tag_label())}</span>' if e.tag_label() else ""
                 published = self._published_label(e)
-                source_text = f"来源：{e.source}" + (f" · {published}" if published else "")
-                url = self._source_url(e)
-                source_link = f' · <a href="{esc(url, quote=True)}">查看原文</a>' if url else ""
+                source_text = f"来源：{self._source_label(e)}" + (f" · {published}" if published else "")
                 rows.append(
                     f'<tr><td style="padding:10px 16px;border-bottom:1px solid #eef0f4;">'
                     f'<span style="color:{sev_color};font-weight:bold;">[{esc(e.severity_label)}]</span> '
                     f'<strong style="color:#1c1f26;font-size:13px;">{esc(e.title)}</strong>{tag}<br/>'
                     f'<span style="color:#565b64;font-size:12px;line-height:1.7;">{esc(e.summary)}</span><br/>'
-                    f'<span style="color:#8a94a3;font-size:11px;">{esc(source_text)}{source_link}</span>'
+                    f'<span style="color:#8a94a3;font-size:11px;">{esc(source_text)}</span>'
                     f'</td></tr>'
                 )
 
@@ -464,8 +499,7 @@ body{{font-family:-apple-system,"Segoe UI","Microsoft YaHei","PingFang SC",sans-
             '</td></tr>'
             + "".join(rows)
             + '<tr><td style="padding:14px 28px;color:#a2abb8;font-size:11px;text-align:center;">'
-            f"🌐 数据来源：{'、'.join(sorted({e.source for e in events}))}<br/>"
-            '🤖 AI 摘要引擎 · 内部参考 · 详情见 PDF 附件</td></tr>'
+            '华东安保二部</td></tr>'
             '</table></td></tr></table></body></html>'
         )
 
@@ -687,13 +721,11 @@ body{{font-family:-apple-system,"Segoe UI","Microsoft YaHei","PingFang SC",sans-
             for e in items:
                 sev_color = SEV_COLORS.get(e.severity, "#000")
                 published = self._published_label(e)
-                source_text = f"来源：{e.source}" + (f" · {published}" if published else "")
-                source_url = self._source_url(e)
-                source_link = f' · <link href="{esc(source_url, quote=True)}">查看原文</link>' if source_url else ""
+                source_text = f"来源：{self._source_label(e)}" + (f" · {published}" if published else "")
                 story.append(Paragraph(
                     f'<font color="{sev_color}"><b>[{esc(e.severity_label)}]</b></font> {esc(e.title)}<br/>'
                     f'<font color="#565b64">{esc(e.summary)}</font><br/>'
-                    f'<font color="#8a94a3">{esc(source_text)}{source_link}</font>',
+                    f'<font color="#8a94a3">{esc(source_text)}</font>',
                     item_style,
                 ))
             story.append(Spacer(1, 4 * mm))

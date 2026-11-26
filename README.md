@@ -6,7 +6,7 @@
 
 ## 特性
 
-- **物理安防聚焦**：自动过滤纯网络安全（cyber）、合规监管（compliance）、公共卫生（health）类，聚焦地缘冲突 / 恐怖袭击 / 骚乱罢工 / 自然灾害 / 人身与资产安全五大物理安防领域。
+- **行业日报聚焦**：只收录安防行业动态（峰会/产品/企业/市场/政策）与人身资产安全类情报。自动排除网络安全（cyber）、合规监管（compliance）、公共卫生（health）、自然灾害（disaster）、暴力事件（terror，袭击/枪击/爆炸/绑架等）、地缘冲突（geopolitical）与骚乱（unrest）。
 - **四维标签**：每条情报自动识别「地域标签 / 企业标签（安防重点企业及产业链）/ 产品标签（视频监控、门禁、报警等）/ 事件标签（政策、技术、市场、并购、展会等）」，在简报与推送中展示。
 - **安防行业信源**：直连 RSS 接入 Security Magazine / SDM / SecurityInfoWatch / SSI / Australian Security Magazine / TMA / Security Journal UK / International Security Journal / SecurityLink India / Revista Segurança Eletrônica 等（覆盖美/英/澳/印/拉美）；IFSEC、Security Today、SourceSecurity、中文门户与展会动态通过 Google 新闻 `site:` 查询和中文关键词查询兜底。
 - **多信源自动容错**：GDELT、ReliefWeb、USGS 地震、CISA 已知被利用漏洞、NVD、通用 RSS、外交部提醒。单个信源失败不影响整体。
@@ -67,10 +67,11 @@ python -m app.main --schedule
 | `HTML_SITES` | `21csp,afzhan,asmag` | 中文安防门户 HTML 直采（无 RSS 的服务端渲染站点，见 [app/collectors/html.py](app/collectors/html.py)） |
 | `HTML_LIMIT` | `10` | 每个 HTML 站点最多抓取的文章数 |
 | `TOP_N` | `15` | 每日最多上报条数，优先选择有正文的垂直行业报道 |
-| `EMERGENCY_QUOTA` | `1` | 突发事件每天最多 1 条（地震/恐袭/灾害） |
+| `EMERGENCY_QUOTA` | `0` | 突发事件上限；默认 0 = 不收录（灾害、袭击等都不进日报） |
 | `RSS_LIMIT` | `30` | 每个 RSS 信源读取的候选条数 |
 | `MAX_PER_SOURCE` | `6` | 单来源配额（同一 source 名最多入选条数，0=不限制，避免聚合源霸屏） |
 | `DEDUP_DAYS` | `7` | 去重窗口（天） |
+| `TITLE_SIMILARITY` | `0.78` | 标题相似度阈值，识别同一事件的不同媒体改写，降低跨天重合 |
 | `TIME_WINDOW_HOURS` | `72` | 新闻时间窗（小时），72h 覆盖周末，避免周一漏掉周五行业新闻 |
 | `SEVERITY_HIGHLIGHT` | `4` | 「重点关注」阈值 |
 | `WECOM_WEBHOOK` | 空 | 企业微信机器人完整地址 |
@@ -125,14 +126,16 @@ python -m app.main --schedule
 
 ## 物理安防聚焦与四维标签
 
-- **聚焦过滤**：`app/services/classifier.py` 的 `PHYSICAL_SECURITY_CATEGORIES` 定义物理安防保留领域（terror / disaster / personnel）；`BriefAgent.run_daily()` 会用 `Classifier.is_physical_security()` 自动过滤掉 cyber / compliance / health / geopolitical / unrest 类事件。如需调整聚焦范围，改这个集合即可。
+- **聚焦过滤**：`app/services/classifier.py` 的 `PHYSICAL_SECURITY_CATEGORIES` 只保留 `personnel`；`BriefAgent.run_daily()` 会用 `Classifier.is_physical_security()` 自动过滤掉 cyber / compliance / health / disaster（自然灾害）/ terror（暴力事件）/ geopolitical / unrest 类事件。另外 `VIOLENCE_TERMS_*` 会把袭击、枪击、爆炸、绑架、伤亡等暴力新闻硬性排除（含被误分类为 personnel 的情况）。如需调整聚焦范围，改这些集合即可。
 - **行业子类**：`app/services/sector.py` 把事件归入 9 个行业子类（物理安防/安防硬件/周界防护/AI安防/智能安防/安防峰会/行业动态/安防机器人/无人机/突发事件），简报与海报按子类分组。
-- **精准精选**：`BriefAgent._select_top()` 优先有正文的垂直行业报道，在完整候选池中应用来源和主题限额；Google News 聚合源最多入选 2 条，普通监控画面和促销稿排除。突发事件由 `EMERGENCY_QUOTA` 单独控制，默认 1（每天最多 1 条）。
-- **相似事件去重**：同主题事件（地震/袭击/火灾/并购等，按 `_similarity_key` 判定）最多推 2 条，**不限制国家**，只减少同质事件堆叠。
-- **USGS 源头降采样**：`USGSCollector` 默认每国家/地区最多 1 条，避免推送里堆砌一堆同区域小震。
+- **精准精选**：`BriefAgent._select_top()` 优先有正文的垂直行业报道，在完整候选池中应用来源和主题限额；Google News 聚合源最多入选 2 条，普通监控画面和促销稿排除。突发事件由 `EMERGENCY_QUOTA` 控制，默认 0（不收录）。
+- **跨天去重**：精确 key（源 ID / 规范化 URL / 规范化标题）+ **标题相似度**（`TITLE_SIMILARITY`，默认 0.78）双重判定，同一事件的不同媒体改写也会被识别；「未配置推送渠道」不再阻止写入去重历史。
+- **会议报道合并**：同一品牌同一场峰会/展会的多篇报道（如 Milestone 峰会同时被 SSI 与 Benchmark 报道）自动合并为一条，保留正文最完整者。
+- **来源显示**：Google 新闻聚合条目会取回原始媒体名（SecurityWeek、Benchmark Magazine 等）展示，不暴露内部采集器标识与链接。
 - **四维打标**：`app/services/tagger.py` 用规则关键词识别「地域 / 企业 / 产品 / 事件」四维标签，存入 `SecurityEvent.tags` 并在简报、HTML、海报中展示。企业、产品、事件关键词表可在 `tagger.py` 顶部按需扩充。
+- **正文补齐**：入选条目若正文不足 400 字（如 Google 新闻聚合项），`BriefAgent._enrich_bodies()` 会抓取原文正文再交给 LLM，保证摘要能写出厂商、型号、项目、数据等具体事实；抓取失败或聚合跳转链接自动跳过。
 - **自包含总结**：`app/services/summarizer.py` 在 LLM 摘要基础上，对失败/未命中的条目用 `_template_summary()` 生成「地点 + 事件 + 等级」的自包含中文总结，确保收件人不点链接也能看懂。
-- **海报卡片风 PDF**：`app/services/report.py` 用 HTML/CSS 生成海报（深蓝渐变标题、统计徽章、彩色分类卡片、严重度色块、行业标签），再通过本地 Edge / Chrome 无头打印成 PDF（reportlab 兜底）。需要系统已安装 Edge 或 Chrome；未安装时自动回退到 reportlab 的简洁版 PDF。
+- **海报卡片风 PDF/图片**：`app/services/report.py` 生成白底卡片式海报（深蓝标题卡、彩色分类标题+下划线、左侧彩色竖条的条目卡片、右上角严重度徽章、标签与来源），PDF 走 Edge/Chrome 无头打印（A4 分页，reportlab 兜底），邮件正文内嵌 2 倍分辨率长图 PNG。正文不含原文链接，页脚为「华东安保二部」。
 
 ## 无人值守部署（Windows）
 

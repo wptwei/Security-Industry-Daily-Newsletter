@@ -76,7 +76,11 @@ def build_agent(config: Config) -> BriefAgent:
             extra_negative=tuple(config.filter_negative),
         ),
         rater=SeverityRater(),
-        dedup=DedupStore(config.history_file, days=config.dedup_days),
+        dedup=DedupStore(
+            config.history_file,
+            days=config.dedup_days,
+            similarity=config.title_similarity,
+        ),
         summarizer=Summarizer(
             config.enable_llm, config.llm_api_base, config.llm_api_key, config.llm_model, config.llm_timeout
         ),

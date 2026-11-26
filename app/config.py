@@ -17,9 +17,6 @@ load_dotenv(BASE_DIR / ".env")
 
 # 默认 RSS 信源：`URL|领域`，可自行增删
 DEFAULT_RSS_FEEDS = (
-    "https://feeds.bbci.co.uk/news/world/rss.xml|geopolitical",
-    "https://www.aljazeera.com/xml/rss/all.xml|geopolitical",
-    "https://www.theguardian.com/world/rss|geopolitical",
     "https://securityjournaluk.com/feed/|personnel",
     "https://internationalsecurityjournal.com/feed/|personnel",
     "https://securitylinkindia.com/feed/|personnel",
@@ -32,12 +29,19 @@ DEFAULT_RSS_FEEDS = (
     "https://www.securitysales.com/feed/atom/|personnel",
     "https://australiansecuritymagazine.com.au/feed/|personnel",
     "https://tma.us/feed/|personnel",
+    "https://benchmarkmagazine.com/feed/|personnel",
+    "https://www.asiapacificsecuritymagazine.com/feed/|personnel",
+    "https://www.securitysolutions.com.au/feed/|personnel",
     "https://news.google.com/rss/search?q=%22physical+security%22&hl=en-US&gl=US&ceid=US:en|personnel",
     "https://news.google.com/rss/search?q=%22access+control%22+security&hl=en-US&gl=US&ceid=US:en|personnel",
     "https://news.google.com/rss/search?q=%22video+surveillance%22&hl=en-US&gl=US&ceid=US:en|personnel",
     "https://news.google.com/rss/search?q=%22security+camera%22&hl=en-US&gl=US&ceid=US:en|personnel",
     "https://news.google.com/rss/search?q=%22perimeter+security%22&hl=en-US&gl=US&ceid=US:en|personnel",
     "https://news.google.com/rss/search?q=site%3Asourcesecurity.com&hl=en-US&gl=US&ceid=US:en|personnel",
+    "https://news.google.com/rss/search?q=site%3Asecuritymiddleeast.com&hl=en-US&gl=US&ceid=US:en|personnel",
+    "https://news.google.com/rss/search?q=site%3Aifsecglobal.com&hl=en-US&gl=US&ceid=US:en|personnel",
+    "https://news.google.com/rss/search?q=site%3Asecurityindustry.org&hl=en-US&gl=US&ceid=US:en|personnel",
+    "https://news.google.com/rss/search?q=site%3Aasisonline.org&hl=en-US&gl=US&ceid=US:en|personnel",
     "https://news.google.com/rss/search?q=%E5%AE%89%E9%98%B2&hl=zh-CN&gl=CN&ceid=CN:zh-Hans|personnel",
     "https://news.google.com/rss/search?q=%E6%B5%B7%E5%BA%B7%E5%A8%81%E8%A7%86&hl=zh-CN&gl=CN&ceid=CN:zh-Hans|personnel",
     "https://news.google.com/rss/search?q=%E5%A4%A7%E5%8D%8E%E8%82%A1%E4%BB%BD&hl=zh-CN&gl=CN&ceid=CN:zh-Hans|personnel",
@@ -172,8 +176,11 @@ class Config:
 
         # ---- 处理 ----
         self.top_n = _get_int("TOP_N", 15)
-        self.emergency_quota = _get_int("EMERGENCY_QUOTA", 1)
+        # 突发事件（袭击/灾害等）不进入日报：0 = 不收录
+        self.emergency_quota = _get_int("EMERGENCY_QUOTA", 0)
         self.dedup_days = _get_int("DEDUP_DAYS", 7)
+        # 标题相似度阈值：同一事件的不同媒体改写报道也会被判为重合，压低跨天重复率
+        self.title_similarity = _get_float("TITLE_SIMILARITY", 0.78)
         self.severity_highlight = _get_int("SEVERITY_HIGHLIGHT", 4)
         # 单来源配额：同一 source 名最多入选 N 条，避免 Google 新闻等聚合源霸屏。
         # 0 = 不限制。默认 6 以保留多源多样性。
